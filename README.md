@@ -280,9 +280,9 @@ Donate with PayPal ☕
 
 ## Screenshots
 
-| Launcher | API Server | Worker |
-|---|---|---|
-| ![Launcher](images/launcher1.jpg) | ![API Server](images/API-Server.jpg) | ![Worker](images/Worker.jpg) |
+| Launcher Global | Launcher Advance | API Server | Worker |
+|---|---|---|---|
+| ![Launcher1](images/launcher1.jpg) | ![Launcher2](images/launcher2.jpg) | ![API Server](images/API-Server.jpg) | ![Worker](images/Worker.jpg) |
 
 ## Architecture
 
