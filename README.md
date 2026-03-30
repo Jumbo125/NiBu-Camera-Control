@@ -34,6 +34,13 @@ Der **Launcher** ist die Bedien- und Installationsschicht.
 Der **API-Server** ist die HTTP-Schicht.  
 Der **Worker** steuert die Kamera.
 
+## Support
+
+Donate with PayPal ☕
+Wenn dir das Projekt hilft und du mir einen Kaffee ausgeben willst:
+
+[![Donate with PayPal ☕](https://img.shields.io/badge/Donate-PayPal-00457C?logo=paypal&logoColor=white)](https://www.paypal.me/andreasrottmann92)
+
 ## Komponenten auf einen Blick
 
 | Komponente | Aufgabe |
@@ -47,7 +54,7 @@ Der **Worker** steuert die Kamera.
 
 | Launcher | API Server | Worker |
 |---|---|---|
-| ![Launcher](images/launcher1.jpg) | | ![Launcher](images/launcher2.jpg) | ![API Server](images/API-Server.jpg) | ![Worker](images/Worker.jpg) |
+| ![Launcher1](images/launcher1.jpg) | ![Launcher2](images/launcher2.jpg) | ![API Server](images/API-Server.jpg) | ![Worker](images/Worker.jpg) |
 
 ## Architektur
 
@@ -255,6 +262,12 @@ This repository combines the core components of **Photobox CameraBridge** in one
 The **launcher** is the operations and setup layer.  
 The **API server** is the HTTP layer.  
 The **worker** controls the camera.
+
+## Support
+
+Donate with PayPal ☕
+
+[![Donate with PayPal ☕](https://img.shields.io/badge/Donate-PayPal-00457C?logo=paypal&logoColor=white)](https://www.paypal.me/andreasrottmann92)
 
 ## Components at a glance
 
