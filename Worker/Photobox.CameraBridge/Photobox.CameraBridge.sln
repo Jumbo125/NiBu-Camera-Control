@@ -1,0 +1,24 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.2.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Photobox.CameraBridge", "Photobox.CameraBridge.csproj", "{9523BF9C-675D-4D78-02A3-0AB0A43E747F}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{9523BF9C-675D-4D78-02A3-0AB0A43E747F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9523BF9C-675D-4D78-02A3-0AB0A43E747F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9523BF9C-675D-4D78-02A3-0AB0A43E747F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9523BF9C-675D-4D78-02A3-0AB0A43E747F}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {3492CB2C-182A-4F38-B7CF-414037E1BEF3}
+	EndGlobalSection
+EndGlobal

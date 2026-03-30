@@ -1,0 +1,43 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.2.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72D-47B6-A68D-7590B98EB39B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CameraControl.Devices", "src\CameraControl.Devices\CameraControl.Devices.csproj", "{B24E7D39-2E85-E7D7-9CCE-B1E3401CCBE2}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Canon.Eos.Framework", "src\Canon.Eos.Framework\Canon.Eos.Framework.csproj", "{11CA05BB-CBB2-A0DC-D79B-1DACA5779E60}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PortableDeviceLib", "src\PortableDeviceLib\PortableDeviceLib.csproj", "{F9CC852B-389F-F05C-C908-044D5AAE3C53}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{B24E7D39-2E85-E7D7-9CCE-B1E3401CCBE2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B24E7D39-2E85-E7D7-9CCE-B1E3401CCBE2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B24E7D39-2E85-E7D7-9CCE-B1E3401CCBE2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B24E7D39-2E85-E7D7-9CCE-B1E3401CCBE2}.Release|Any CPU.Build.0 = Release|Any CPU
+		{11CA05BB-CBB2-A0DC-D79B-1DACA5779E60}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{11CA05BB-CBB2-A0DC-D79B-1DACA5779E60}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{11CA05BB-CBB2-A0DC-D79B-1DACA5779E60}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{11CA05BB-CBB2-A0DC-D79B-1DACA5779E60}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F9CC852B-389F-F05C-C908-044D5AAE3C53}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F9CC852B-389F-F05C-C908-044D5AAE3C53}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F9CC852B-389F-F05C-C908-044D5AAE3C53}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F9CC852B-389F-F05C-C908-044D5AAE3C53}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{B24E7D39-2E85-E7D7-9CCE-B1E3401CCBE2} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{11CA05BB-CBB2-A0DC-D79B-1DACA5779E60} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{F9CC852B-389F-F05C-C908-044D5AAE3C53} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {4A0C0D96-F0F2-401E-B2F3-62D3DA26D102}
+	EndGlobalSection
+EndGlobal

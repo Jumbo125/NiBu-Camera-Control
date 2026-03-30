@@ -1,0 +1,62 @@
+<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+
+    <!-- Canon EDSDK ist i.d.R. x64 -->
+    <Platforms>x86</Platforms>
+    <PlatformTarget>x86</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+
+    <ApplicationIcon>Assets\photobox.ico</ApplicationIcon>
+    <AssemblyName>CameraWorker</AssemblyName>
+
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Passe die Pfade ggf. an deine echte Ordnerstruktur an -->
+    <ProjectReference Include="..\CameraControl.Devices\CameraControl.Devices.csproj" />
+    <ProjectReference Include="..\Canon.Eos.Framework\Canon.Eos.Framework.csproj" />
+    <ProjectReference Include="..\PortableDeviceLib\PortableDeviceLib.csproj" />
+      <!-- NEU: IPC/Shared -->
+  <ProjectReference Include="..\Photobox.Bridge.Shared\Photobox.Bridge.Shared.csproj" />
+  <ProjectReference Include="..\Photobox.Bridge.WorkerIpc\Photobox.Bridge.WorkerIpc.csproj" />
+    
+  </ItemGroup>
+
+  <!-- ICO -->
+<ItemGroup>
+  <Content Include="Assets\photobox.ico">
+    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+  </Content>
+</ItemGroup>
+
+
+ 
+
+  <!-- Native DLLs aus ./dlls/ ins Output ROOT (neben der exe) kopieren -->
+  <ItemGroup>
+    <None Include="dlls\*.dll">
+      <Link>%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <!-- JSON Konfig ebenfalls neben die exe kopieren -->
+  <ItemGroup>
+    <None Include="Config\appsettings.json">
+      <Link>appsettings.json</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="Config\camera-map.json">
+      <Link>camera-map.json</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>
