@@ -52,8 +52,8 @@ Wenn dir das Projekt hilft und du mir einen Kaffee ausgeben willst:
 
 ## Screenshots
 
-| Launcher | API Server | Worker |
-|---|---|---|
+| Launcher Allgemein | Launcher Erweitert | API Server | Worker |
+|---|---|---|---|
 | ![Launcher1](images/launcher1.jpg) | ![Launcher2](images/launcher2.jpg) | ![API Server](images/API-Server.jpg) | ![Worker](images/Worker.jpg) |
 
 ## Architektur
