@@ -1,0 +1,30 @@
+{
+    "Server": {
+        "ExePath": "__BASE_DIR__\\booth\\tools\\camerabridge\\APIServer\\Photobox.Bridge.ApiServer.exe",
+        "camerabridge_server_headless": false,
+        "camerabridge_server_one_instance": true
+    },
+    "Bridge": {
+        "BindAddress": "127.0.0.1",
+        "Port": __BRIDGE_PORT__,
+		"PipeName": "Photobox.CameraBridge.CommandPipe",
+        "MjpegPath": "/live.mjpg",
+        "AuthKey": "9igomRK4v8lNAdvJ1I0GJY_A_C6KU6QQBSfgLeI5H9U"
+    },
+    "Health": {
+        "IntervalMs": 2000,
+        "TimeoutMs": 3000
+    },
+    "Logging": {
+        "LogFile": "__BASE_DIR__\\booth\\tools\\camerabridge\\APIServer\\ApiServer_log.txt"
+    },
+    "Worker": {
+        "ExePath": "__BASE_DIR__\\booth\\tools\\camerabridge\\Worker\\CameraWorker.exe",
+        "Args": "--one-instance --no-select --headless --log=__BASE_DIR__\\booth\\tools\\camerabridge\\Worker\\Worker_log.txt",
+        "AutoStartOnBoot": true,
+        "AutoStartWhenUnreachable": true,
+        "StartCooldownMs": 8000,
+        "FailThreshold": 3,
+        "LogFile": "__BASE_DIR__\\booth\\tools\\camerabridge\\Worker\\Worker_log.txt"
+    }
+}
