@@ -7,6 +7,7 @@
 ![LiveView](https://img.shields.io/badge/LiveView-MJPEG-orange)
 ![IPC](https://img.shields.io/badge/IPC-Named%20Pipe-6f42c1)
 ![Docs](https://img.shields.io/badge/Docs-Swagger%20%2F%20OpenAPI-85ea2d)
+![Browser](https://img.shields.io/badge/Browser-WebView2-1f6feb)
 
 [Deutsch](#deutsch) | [English](#english)
 
@@ -28,15 +29,17 @@ Dieses Repository bündelt die zentralen Komponenten der **Photobox CameraBridge
 - **launcher.exe** als zentrale Windows-Oberfläche für Installation, Start, Stop, Monitoring und Wartung
 - **ApiServer.exe** als HTTP-/JSON-API mit Swagger / OpenAPI und MJPEG-LiveView
 - **worker.exe** als eigentliche Kameraschnittstelle
+- **NiBu-Photobox-Browser** als lokaler WebView2-Host für die Photobox-Oberfläche und die direkte Browser-Steuerung aus HTML / JavaScript
 - **Shared / WorkerIpc** für gemeinsame DTOs, Commands und Named-Pipe-IPC
 
 Der **Launcher** ist die Bedien- und Installationsschicht.  
 Der **API-Server** ist die HTTP-Schicht.  
-Der **Worker** steuert die Kamera.
+Der **Worker** steuert die Kamera.  
+Der **NiBu-Photobox-Browser** stellt die lokale Browser-/Kiosk-Schicht bereit.
 
 ## Support
 
-Donate with PayPal ☕
+Donate with PayPal ☕  
 Wenn dir das Projekt hilft und du mir einen Kaffee ausgeben willst:
 
 [![Donate with PayPal ☕](https://img.shields.io/badge/Donate-PayPal-00457C?logo=paypal&logoColor=white)](https://www.paypal.me/andreasrottmann92)
@@ -48,6 +51,7 @@ Wenn dir das Projekt hilft und du mir einen Kaffee ausgeben willst:
 | `launcher.exe` | Installiert und verwaltet die lokale Umgebung, startet Dienste, öffnet die App, zeigt Status und Logs an |
 | `ApiServer.exe` | Stellt die HTTP/JSON-API bereit, streamt MJPEG-LiveView und zeigt die API-Dokumentation via Swagger / OpenAPI |
 | `worker.exe` | Kapselt die Kamerasteuerung, LiveView, Capture, Settings und Watchdog |
+| `NiBu-Photobox-Browser` | Lokaler WebView2-Host für lokale oder HTTP-basierte Oberflächen, Kioskmodus und direkte Steuerung per JavaScript-Bridge |
 | `Shared` / `WorkerIpc` | Definieren Commands, DTOs, Pipe-Protokoll und die IPC-Schicht |
 
 ## Screenshots
@@ -67,13 +71,19 @@ Launcher / UI / lokale Verwaltung
             │
             └─ optionaler technischer Zugriff auf Logs / Setup / Wartung
 
-Web UI / Controller
+Web UI / HTML / JavaScript
         ↓ HTTP / JSON
     ApiServer.exe
         ↕ Named Pipe IPC
       worker.exe
         ↕
       Kamera
+
+Web UI / HTML / JavaScript
+        ↕ Host Bridge
+NiBu-Photobox-Browser
+        ↕
+   WebView2 / Kiosk / lokaler Host
 ```
 
 ## Repository-Struktur
@@ -85,6 +95,7 @@ Web UI / Controller
   /Photobox.Bridge.WorkerIpc
   /Photobox.Bridge.Worker
   /Photobox.Bridge.ApiServer
+/browser
 /images
 /icons
 /docs
@@ -135,6 +146,46 @@ Typische Aufgaben:
 - Capture als Datei oder JPEG ausführen
 - optionalen USB-/Reconnect-Watchdog steuern
 
+### NiBu-Photobox-Browser
+
+Der **NiBu-Photobox-Browser** ist ein lokaler Browser-Host auf Basis von **WebView2** für einen flüssigeren Workflow bei der Steuerung der Photobox-Oberfläche direkt aus HTML / JavaScript.
+
+Typische Aufgaben:
+
+- lokale HTML-Dateien oder HTTP-/HTTPS-Ziele laden
+- im **Kioskmodus** starten oder zwischen normalem Fenster und Kiosk umschalten
+- lokale Konfiguration über `init.json` verwenden
+- Fenstertitel, Icon, Startziel und Tray-Verhalten konfigurieren
+- direkte Host-Steuerung aus JavaScript über `window.hostApp`
+
+Typische JavaScript-Funktionen:
+
+- `window.hostApp.minimize()`
+- `window.hostApp.maximize()`
+- `window.hostApp.restore()`
+- `window.hostApp.setKiosk(true)`
+- `window.hostApp.setKiosk(false)`
+- `window.hostApp.exit()`
+- `window.hostApp.close()`
+
+Typische `init.json`-Optionen:
+
+- `url`
+- `defaultUrl`
+- `defaultPort`
+- `localIndexPath`
+- `kiosk`
+- `title`
+- `icon`
+- `minimizeToTray`
+- `allowDevTools`
+
+Hinweise:
+
+- `url` kann auf eine Web-URL oder eine lokale HTML-Datei zeigen.
+- Eine lokale `.php`-Datei wird nicht als PHP ausgeführt. Dafür ist eine Server-URL wie `http://127.0.0.1:8080/index.php` nötig.
+- Das Beenden per Fenster-X oder per JavaScript ist ohne Passwort möglich.
+
 ## Gemeinsames Protokoll
 
 Die Kommunikation zwischen API-Server und Worker läuft über **Named Pipe IPC** mit gemeinsamen Commands und DTOs.
@@ -184,6 +235,14 @@ Die Komfortfunktion **Capture + danach LiveView** wird auf Ebene des API-Servers
    - `GET /api/status`
    - `GET /docs`
    - `GET /live.mjpg`
+
+### Variante C – über den NiBu-Photobox-Browser
+
+1. Browser-Konfiguration in `init.json` prüfen oder anlegen
+2. `url` oder `localIndexPath` auf das gewünschte Startziel setzen
+3. optional `kiosk`, `title`, `icon`, `minimizeToTray` und `allowDevTools` festlegen
+4. **NiBu-Photobox-Browser** starten
+5. Oberfläche laden und bei Bedarf aus JavaScript über `window.hostApp` steuern
 
 ## Typische Standardports
 
@@ -257,11 +316,13 @@ This repository combines the core components of **Photobox CameraBridge** in one
 - **launcher.exe** as the central Windows UI for installation, start, stop, monitoring and maintenance
 - **ApiServer.exe** as the HTTP/JSON API with Swagger / OpenAPI and MJPEG LiveView
 - **worker.exe** as the actual camera bridge
+- **NiBu-Photobox-Browser** as a local WebView2 host for the Photobox frontend and improved browser control directly from HTML / JavaScript
 - **Shared / WorkerIpc** for common DTOs, commands and Named Pipe IPC
 
 The **launcher** is the operations and setup layer.  
 The **API server** is the HTTP layer.  
-The **worker** controls the camera.
+The **worker** controls the camera.  
+The **NiBu-Photobox-Browser** provides the local browser / kiosk layer.
 
 ## Support
 
@@ -276,6 +337,7 @@ Donate with PayPal ☕
 | `launcher.exe` | Installs and manages the local environment, starts services, opens the app, shows status and logs |
 | `ApiServer.exe` | Provides the HTTP/JSON API, streams MJPEG LiveView and exposes API docs through Swagger / OpenAPI |
 | `worker.exe` | Handles camera control, LiveView, capture, settings and watchdog |
+| `NiBu-Photobox-Browser` | Local WebView2 host for local or HTTP-based frontend targets, kiosk mode and direct JavaScript bridge control |
 | `Shared` / `WorkerIpc` | Define commands, DTOs, pipe protocol and the IPC layer |
 
 ## Screenshots
@@ -295,13 +357,19 @@ Launcher / UI / local administration
             │
             └─ optional technical access to logs / setup / maintenance
 
-Web UI / Controller
+Web UI / HTML / JavaScript
         ↓ HTTP / JSON
     ApiServer.exe
         ↕ Named Pipe IPC
       worker.exe
         ↕
       Camera
+
+Web UI / HTML / JavaScript
+        ↕ Host bridge
+NiBu-Photobox-Browser
+        ↕
+   WebView2 / kiosk / local host
 ```
 
 ## Repository structure
@@ -313,6 +381,7 @@ Web UI / Controller
   /Photobox.Bridge.WorkerIpc
   /Photobox.Bridge.Worker
   /Photobox.Bridge.ApiServer
+/browser
 /images
 /icons
 /docs
@@ -363,6 +432,46 @@ Typical tasks:
 - execute capture as file or JPEG
 - manage optional USB / reconnect watchdog behavior
 
+### NiBu-Photobox-Browser
+
+The **NiBu-Photobox-Browser** is a local **WebView2** host for a smoother workflow when controlling the Photobox frontend directly from HTML / JavaScript.
+
+Typical tasks:
+
+- load local HTML files or HTTP / HTTPS targets
+- start in **kiosk mode** or switch between normal window and kiosk mode
+- use local configuration through `init.json`
+- configure window title, icon, startup target and tray behavior
+- expose direct host control to JavaScript through `window.hostApp`
+
+Typical JavaScript functions:
+
+- `window.hostApp.minimize()`
+- `window.hostApp.maximize()`
+- `window.hostApp.restore()`
+- `window.hostApp.setKiosk(true)`
+- `window.hostApp.setKiosk(false)`
+- `window.hostApp.exit()`
+- `window.hostApp.close()`
+
+Typical `init.json` options:
+
+- `url`
+- `defaultUrl`
+- `defaultPort`
+- `localIndexPath`
+- `kiosk`
+- `title`
+- `icon`
+- `minimizeToTray`
+- `allowDevTools`
+
+Notes:
+
+- `url` can point to a web URL or a local HTML file.
+- A local `.php` file is not executed as PHP. For PHP, use a server URL such as `http://127.0.0.1:8080/index.php`.
+- Closing via window X or via JavaScript works without a password.
+
 ## Shared protocol
 
 Communication between API server and worker uses **Named Pipe IPC** with shared commands and DTOs.
@@ -412,6 +521,14 @@ The convenience flow **capture + then restart LiveView** is implemented at API-s
    - `GET /api/status`
    - `GET /docs`
    - `GET /live.mjpg`
+
+### Option C – via NiBu-Photobox-Browser
+
+1. create or review the browser `init.json`
+2. set `url` or `localIndexPath` to the desired startup target
+3. optionally configure `kiosk`, `title`, `icon`, `minimizeToTray` and `allowDevTools`
+4. start **NiBu-Photobox-Browser**
+5. load the UI and control the host from JavaScript through `window.hostApp` if needed
 
 ## Typical default ports
 
