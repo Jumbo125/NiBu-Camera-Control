@@ -1,0 +1,10 @@
+{
+  "url": "",
+  "defaultUrl": "http://127.0.0.1",
+  "defaultPort": 8080,
+  "localIndexPath": "wwwroot/index.html",
+  "kiosk": false,
+  "title": "",
+  "icon": "",
+  "allowDevTools": false
+}

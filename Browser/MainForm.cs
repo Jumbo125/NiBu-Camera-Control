@@ -74,6 +74,32 @@ namespace Fotobox.WebView2Host
 
             _webView.CoreWebView2.WebMessageReceived += CoreWebView2_WebMessageReceived;
 
+            await _webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(@"
+                window.hostApp = window.hostApp || {
+                    minimize: function () {
+                        window.chrome?.webview?.postMessage({ action: 'minimize' });
+                    },
+                    maximize: function () {
+                        window.chrome?.webview?.postMessage({ action: 'maximize' });
+                    },
+                    restore: function () {
+                        window.chrome?.webview?.postMessage({ action: 'restore' });
+                    },
+                    setKiosk: function (value) {
+                        window.chrome?.webview?.postMessage({ action: 'setkiosk', value: !!value });
+                    },
+                    toggleKioskMode: function () {
+                        window.chrome?.webview?.postMessage({ action: 'togglekiosk' });
+                    },
+                    close: function () {
+                        window.chrome?.webview?.postMessage({ action: 'close' });
+                    },
+                    exit: function () {
+                        window.chrome?.webview?.postMessage({ action: 'exit' });
+                    }
+                };
+            ");
+
             var target = ResolveStartupTarget();
             _webView.CoreWebView2.Navigate(target);
         }
@@ -116,6 +142,10 @@ namespace Fotobox.WebView2Host
                         }
                         break;
 
+                    case "togglekiosk":
+                        ToggleKiosk();
+                        break;
+
                     case "close":
                     case "exit":
                         Close();
@@ -142,6 +172,18 @@ namespace Fotobox.WebView2Host
                 FormBorderStyle = FormBorderStyle.Sizable;
                 WindowState = FormWindowState.Maximized;
             }
+        }
+
+
+        private bool IsKioskMode()
+        {
+            return FormBorderStyle == FormBorderStyle.None && TopMost;
+        }
+
+        private void ToggleKiosk()
+        {
+            SetKiosk(!IsKioskMode());
+            Activate();
         }
 
         private string ResolveStartupTarget()
