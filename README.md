@@ -154,7 +154,7 @@ Typische Aufgaben:
 
 - lokale HTML-Dateien oder HTTP-/HTTPS-Ziele laden
 - im **Kioskmodus** starten oder zwischen normalem Fenster und Kiosk umschalten
-- lokale Konfiguration über `init.json` verwenden
+- lokale Konfiguration über `init.json` oder direkt über Startparameter / Flags verwenden
 - Fenstertitel, Icon, Startziel und Tray-Verhalten konfigurieren
 - direkte Host-Steuerung aus JavaScript über `window.hostApp`
 
@@ -180,9 +180,20 @@ Typische `init.json`-Optionen:
 - `minimizeToTray`
 - `allowDevTools`
 
+Wichtige Startparameter / Flags können alternativ auch direkt beim Start übergeben werden, zum Beispiel:
+
+```powershell
+$BrowserArgs = @(
+  "--url=$baseUrl",
+  "--port=$caddyPort",
+  "--kiosk=true"
+)
+```
+
 Hinweise:
 
 - `url` kann auf eine Web-URL oder eine lokale HTML-Datei zeigen.
+- Zentrale Browser-Parameter wie `url`, `port` und `kiosk` können nicht nur über `init.json`, sondern auch direkt über Startparameter / Flags gesetzt werden.
 - Eine lokale `.php`-Datei wird nicht als PHP ausgeführt. Dafür ist eine Server-URL wie `http://127.0.0.1:8080/index.php` nötig.
 - Das Beenden per Fenster-X oder per JavaScript ist ohne Passwort möglich.
 
@@ -238,7 +249,7 @@ Die Komfortfunktion **Capture + danach LiveView** wird auf Ebene des API-Servers
 
 ### Variante C – über den NiBu-Photobox-Browser
 
-1. Browser-Konfiguration in `init.json` prüfen oder anlegen
+1. Browser-Konfiguration in `init.json` prüfen oder Startparameter / Flags festlegen
 2. `url` oder `localIndexPath` auf das gewünschte Startziel setzen
 3. optional `kiosk`, `title`, `icon`, `minimizeToTray` und `allowDevTools` festlegen
 4. **NiBu-Photobox-Browser** starten
@@ -440,7 +451,7 @@ Typical tasks:
 
 - load local HTML files or HTTP / HTTPS targets
 - start in **kiosk mode** or switch between normal window and kiosk mode
-- use local configuration through `init.json`
+- use local configuration through `init.json` or directly through startup parameters / flags
 - configure window title, icon, startup target and tray behavior
 - expose direct host control to JavaScript through `window.hostApp`
 
@@ -466,9 +477,20 @@ Typical `init.json` options:
 - `minimizeToTray`
 - `allowDevTools`
 
+Important startup parameters / flags can also be passed directly when launching, for example:
+
+```powershell
+$BrowserArgs = @(
+  "--url=$baseUrl",
+  "--port=$caddyPort",
+  "--kiosk=true"
+)
+```
+
 Notes:
 
 - `url` can point to a web URL or a local HTML file.
+- Core browser parameters such as `url`, `port` and `kiosk` can be provided not only through `init.json` but also directly through startup parameters / flags.
 - A local `.php` file is not executed as PHP. For PHP, use a server URL such as `http://127.0.0.1:8080/index.php`.
 - Closing via window X or via JavaScript works without a password.
 
@@ -524,7 +546,7 @@ The convenience flow **capture + then restart LiveView** is implemented at API-s
 
 ### Option C – via NiBu-Photobox-Browser
 
-1. create or review the browser `init.json`
+1. create or review the browser `init.json`, or define startup parameters / flags
 2. set `url` or `localIndexPath` to the desired startup target
 3. optionally configure `kiosk`, `title`, `icon`, `minimizeToTray` and `allowDevTools`
 4. start **NiBu-Photobox-Browser**
