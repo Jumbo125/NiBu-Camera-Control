@@ -410,13 +410,42 @@ namespace Photobox.CameraBridge.Core
             };
         }
 
-        private static bool IsNikonCamera(string manufacturer, string model)
+        private enum CameraProfile
+        {
+            NikonDslr,
+            WebcamLike,
+            GenericDslr
+        }
+
+        private static CameraProfile GetCameraProfile(object camObj, string manufacturer, string model)
         {
             var maker = manufacturer ?? "";
             var mdl = model ?? "";
+            var type = camObj?.GetType().FullName ?? "";
 
-            return maker.IndexOf("nikon", StringComparison.OrdinalIgnoreCase) >= 0
-                || mdl.IndexOf("nikon", StringComparison.OrdinalIgnoreCase) >= 0;
+            if (maker.IndexOf("nikon", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                mdl.IndexOf("nikon", StringComparison.OrdinalIgnoreCase) >= 0)
+                return CameraProfile.NikonDslr;
+
+            if (type.IndexOf("wia", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                type.IndexOf("webcam", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                type.IndexOf("uvc", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                maker.IndexOf("uvc", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                maker.IndexOf("integrated", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                mdl.IndexOf("webcam", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                mdl.IndexOf("uvc", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                mdl.IndexOf("integrated camera", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                mdl.IndexOf("integrated", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                mdl.IndexOf("virtual camera", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                maker.IndexOf("obs", StringComparison.OrdinalIgnoreCase) >= 0)
+                return CameraProfile.WebcamLike;
+
+            return CameraProfile.GenericDslr;
+        }
+
+        private static bool IsNikonCamera(string manufacturer, string model)
+        {
+            return GetCameraProfile(null, manufacturer, model) == CameraProfile.NikonDslr;
         }
 
         private static bool IsDeviceBusy(Exception ex)
@@ -697,7 +726,16 @@ namespace Photobox.CameraBridge.Core
                 _log.Info($"CaptureWithTemporarySettingsAsync apply={applySettings}, restoreAfter={restoreAfterShoot}, startLiveViewAfterCapture={startLiveViewAfterCapture}");
 
                 var wasLiveViewRunning = LiveView.IsRunning;
-                var isNikon = IsNikonCamera(cam.Manufacturer, cam.DeviceName);
+                var profile = GetCameraProfile(cam, cam.Manufacturer, cam.DeviceName);
+                var isNikon = profile == CameraProfile.NikonDslr;
+                var stopLiveViewBeforeCapture =
+                    profile == CameraProfile.NikonDslr ||
+                    profile == CameraProfile.GenericDslr;
+                var restartLiveViewAfterCapture =
+                    profile == CameraProfile.NikonDslr ||
+                    profile == CameraProfile.GenericDslr;
+
+                _log.Info($"CaptureWithTemporarySettingsAsync profile={profile}, wasLiveViewRunning={wasLiveViewRunning}, stopBefore={stopLiveViewBeforeCapture}, restartAfter={restartLiveViewAfterCapture}");
 
                 CameraSettingsDto old = null;
                 double? oldExposure = null;
@@ -715,7 +753,7 @@ namespace Photobox.CameraBridge.Core
                     oldExposure = TryParseExposureValue(old.Exposure);
                 }
 
-                if (wasLiveViewRunning)
+                if (wasLiveViewRunning && stopLiveViewBeforeCapture)
                 {
                     _log.Info("CaptureWithTemporarySettingsAsync: stopping LiveView before capture.");
                     try { await LiveView.StopAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false); } catch { }
@@ -861,7 +899,11 @@ namespace Photobox.CameraBridge.Core
 
                     await _mta.InvokeAsync(() => cam.PhotoCaptured -= handler).ConfigureAwait(false);
 
-                    if (wasLiveViewRunning || startLiveViewAfterCapture)
+                    var shouldRestartLiveView =
+                        restartLiveViewAfterCapture &&
+                        (wasLiveViewRunning || startLiveViewAfterCapture);
+
+                    if (shouldRestartLiveView)
                     {
                         try
                         {
@@ -897,8 +939,6 @@ namespace Photobox.CameraBridge.Core
             _switchGate.Wait();
             try
             {
-                StopLiveViewHardAsync().GetAwaiter().GetResult();
-
                 var cam = _mta.InvokeAsync(() =>
                 {
                     var c = Manager.SelectedCameraDevice;
@@ -907,6 +947,22 @@ namespace Photobox.CameraBridge.Core
                     try { c.PreventShutDown = true; } catch { }
                     return c;
                 }).GetAwaiter().GetResult();
+
+                var profile = GetCameraProfile(cam, cam.Manufacturer, cam.DeviceName);
+                _log.Info($"StartLiveView profile={profile}, alreadyRunning={LiveView.IsRunning}, maker={cam.Manufacturer}, model={cam.DeviceName}, sdkType={cam.GetType().FullName}");
+
+                if (profile == CameraProfile.NikonDslr)
+                {
+                    StopLiveViewHardAsync().GetAwaiter().GetResult();
+                    LiveView.Start(cam, FrameHub);
+                    return;
+                }
+
+                if (LiveView.IsRunning)
+                {
+                    _log.Info("StartLiveView skipped because already running.");
+                    return;
+                }
 
                 LiveView.Start(cam, FrameHub);
             }
