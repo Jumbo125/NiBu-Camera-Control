@@ -15,6 +15,7 @@
   <img src="icons/launcher-ico.png" alt="Launcher icon" width="72" />
   <img src="icons/api-server-ico.png" alt="API Server icon" width="72" />
   <img src="icons/worker-ico.png" alt="Worker icon" width="72" />
+  <img src="icons/browser.jpg" alt="Worker icon" width="72" />
 </p>
 
 ---
