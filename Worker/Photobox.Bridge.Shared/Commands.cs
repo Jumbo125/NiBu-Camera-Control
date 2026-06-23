@@ -21,4 +21,6 @@ public static class Commands
     public const string WatchdogSet = "watchdog.set";
 
     public const string FrameWaitNext = "frame.wait_next";
+
+    public const string Shutdown = "worker.shutdown";
 }

@@ -9,6 +9,7 @@
         "Port": __BRIDGE_PORT__,
 		"PipeName": "Photobox.CameraBridge.CommandPipe",
         "MjpegPath": "/live.mjpg",
+        "AllowedOrigins": [ "http://127.0.0.1:__CADDY_PORT__", "http://localhost:__CADDY_PORT__" ],
         "AuthKey": "9igomRK4v8lNAdvJ1I0GJY_A_C6KU6QQBSfgLeI5H9U"
     },
     "Health": {

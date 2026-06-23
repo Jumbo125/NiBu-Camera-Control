@@ -18,6 +18,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Cors.Infrastructure;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
@@ -30,6 +31,8 @@ namespace Photobox.Bridge.ApiServer;
 
 public static partial class Program
 {
+    internal const string CorsPolicyName = "BridgeCors";
+
     private static void SetupTray()
     {
         Icon icon;
@@ -238,8 +241,10 @@ public static partial class Program
             if (app == null)
                 return;
 
-            var pm = app.Services.GetRequiredService<WorkerProcessManager>();
+            var pm      = app.Services.GetRequiredService<WorkerProcessManager>();
+            var monitor = app.Services.GetRequiredService<WorkerHealthMonitor>();
             var res = await pm.EnsureStartedAsync("tray_restart", CancellationToken.None);
+            if (res.ok) monitor.NotifyWorkerStarted();
 
             try
             {
@@ -355,11 +360,18 @@ public static partial class Program
         builder.Services.AddSingleton<StreamState>();
         builder.Services.AddSingleton<WorkerHealthState>();
         builder.Services.AddSingleton<WorkerProcessManager>();
-        builder.Services.AddHostedService<WorkerHealthMonitor>();
+        builder.Services.AddSingleton<WorkerHealthMonitor>();
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<WorkerHealthMonitor>());
+
+        var rawSettings = builder.Configuration.GetSection("Bridge").Get<BridgeSettings>() ?? new BridgeSettings();
+        var allowedOrigins = rawSettings.AllowedOrigins is { Length: > 0 }
+            ? rawSettings.AllowedOrigins
+            : null;
 
         builder.Services.AddCors(o =>
         {
-            o.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod());
+            o.AddPolicy(CorsPolicyName, BuildCorsPolicy(allowedOrigins));
+            o.AddDefaultPolicy(BuildCorsPolicy(allowedOrigins));
         });
 
         builder.Services.AddEndpointsApiExplorer();
@@ -373,8 +385,12 @@ public static partial class Program
             var wset = app.Services.GetRequiredService<IOptions<WorkerSettings>>().Value;
             if (wset.AutoStartOnBoot)
             {
-                var pm = app.Services.GetRequiredService<WorkerProcessManager>();
+                var pm      = app.Services.GetRequiredService<WorkerProcessManager>();
+                var monitor = app.Services.GetRequiredService<WorkerHealthMonitor>();
                 _ = pm.EnsureStartedAsync("boot", CancellationToken.None);
+                // Grace-Period setzen, damit der Monitor die Worker-Startphase nicht als
+                // "connection LOST" wertet.
+                monitor.NotifyWorkerStarted();
                 Log.Information("Worker autostart on boot triggered (AutoStartOnBoot=true).");
             }
             else
@@ -396,7 +412,21 @@ public static partial class Program
 
     private static void ConfigureMiddleware(WebApplication app, BridgeSettings settings)
     {
-        app.UseCors();
+        app.UseCors(CorsPolicyName);
+
+        app.Use(async (ctx, next) =>
+        {
+            if (
+                HttpMethods.IsOptions(ctx.Request.Method)
+                && IsCorsPreflightRequest(ctx.Request)
+            )
+            {
+                ctx.Response.StatusCode = StatusCodes.Status204NoContent;
+                return;
+            }
+
+            await next();
+        });
 
         app.UseStaticFiles(
             new StaticFileOptions
@@ -479,8 +509,32 @@ public static partial class Program
 
     private static void MapUtilityEndpoints(WebApplication app)
     {
+        app.MapMethods(
+                "/{*path}",
+                [HttpMethods.Options],
+                () => Results.NoContent()
+            )
+            .RequireCors(CorsPolicyName);
+
         app.MapGet("/swagger", () => Results.Redirect("/docs", permanent: false));
         app.MapGet("/swagger/index.html", () => Results.Redirect("/docs/index.html", permanent: false));
         app.MapGet("/openapi/v1.json", () => Results.Redirect("/swagger/v1/swagger.json", permanent: false));
+    }
+
+    private static Action<CorsPolicyBuilder> BuildCorsPolicy(string[]? allowedOrigins)
+    {
+        return policy =>
+        {
+            if (allowedOrigins is { Length: > 0 })
+                policy.WithOrigins(allowedOrigins).AllowAnyHeader().AllowAnyMethod();
+            else
+                policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
+        };
+    }
+
+    private static bool IsCorsPreflightRequest(HttpRequest request)
+    {
+        return request.Headers.ContainsKey("Origin")
+            && request.Headers.ContainsKey("Access-Control-Request-Method");
     }
 }

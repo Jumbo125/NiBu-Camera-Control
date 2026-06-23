@@ -13,15 +13,17 @@ public sealed class BridgeIpcServer : IDisposable
     private readonly string _pipeName;
     private readonly IBridgeWorker _worker;
     private readonly Action<string>? _log;
+    private readonly Action? _shutdownCallback;
 
     private CancellationTokenSource? _cts;
     private Task? _acceptLoop;
 
-    public BridgeIpcServer(IBridgeWorker worker, string? pipeName = null, Action<string>? log = null)
+    public BridgeIpcServer(IBridgeWorker worker, string? pipeName = null, Action<string>? log = null, Action? onShutdown = null)
     {
         _worker = worker ?? throw new ArgumentNullException(nameof(worker));
         _pipeName = string.IsNullOrWhiteSpace(pipeName) ? PipeNames.CommandPipe : pipeName;
         _log = log;
+        _shutdownCallback = onShutdown;
     }
 
     public void Start()
@@ -225,6 +227,21 @@ public sealed class BridgeIpcServer : IDisposable
                         JpegBase64 = (jpeg == null || jpeg.Length == 0) ? null : Convert.ToBase64String(jpeg)
                     };
                     return Ok(id, payload);
+                }
+
+                case Commands.Shutdown:
+                {
+                    // Fire shutdown after response is written so the client can read it.
+                    var cb = _shutdownCallback;
+                    if (cb != null)
+                    {
+                        _ = Task.Run(async () =>
+                        {
+                            await Task.Delay(200).ConfigureAwait(false);
+                            try { cb(); } catch { }
+                        });
+                    }
+                    return Ok(id, new OkDto { Ok = true });
                 }
 
                 default:

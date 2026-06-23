@@ -40,6 +40,10 @@ public sealed class WorkerHealthMonitor : BackgroundService
     private DateTime _nextStartAllowedUtc = DateTime.MinValue;
     private DateTime _startupGraceUntilUtc = DateTime.MinValue;
 
+    // Initiale Grace-Period: Startet ab Konstruktor, damit boot-time Worker-Start
+    // nicht sofort als "connection LOST" gewertet wird.
+    private static readonly TimeSpan InitialBootGrace = TimeSpan.FromSeconds(20);
+
     // Defaults / Tunables
     private const int DefaultIntervalMs = 2000;
     private const int DefaultTimeoutMs  = 8000;   // sinnvoller Default als 800ms
@@ -59,6 +63,23 @@ public sealed class WorkerHealthMonitor : BackgroundService
         _health = health.Value;
         _worker = worker.Value;
         _pm = pm;
+
+        // Boot-Grace: Verhindert sofortige "connection LOST"-Meldung wenn der Worker
+        // gerade erst über AutoStartOnBoot gestartet wurde und noch initialisiert.
+        _startupGraceUntilUtc = DateTime.UtcNow.Add(InitialBootGrace);
+    }
+
+    /// <summary>
+    /// Setzt Grace-Period und Cooldown zurück, wenn extern ein Worker-Start ausgelöst wurde
+    /// (z.B. über AutoStartOnBoot oder manuellen API-Restart).
+    /// </summary>
+    public void NotifyWorkerStarted()
+    {
+        var now = DateTime.UtcNow;
+        _startupGraceUntilUtc = now.AddMilliseconds(StartupGraceMs);
+        _nextStartAllowedUtc  = now.AddMilliseconds(RestartCooldownMs);
+        _downSinceUtc         = null;
+        _failsInRow           = 0;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -79,7 +100,8 @@ public sealed class WorkerHealthMonitor : BackgroundService
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
                 cts.CancelAfter(timeoutMs);
 
-                _ = await _ipc.CallAsync<WorkerStatusDto>(Commands.StatusGet, null, cts.Token);
+                var workerStatus = await _ipc.CallAsync<WorkerStatusDto>(Commands.StatusGet, null, cts.Token);
+                _state.SetOk(workerStatus);
                 ok = true;
             }
             catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
@@ -98,7 +120,6 @@ public sealed class WorkerHealthMonitor : BackgroundService
 
                 _failsInRow = 0;
                 _downSinceUtc = null;
-                _state.SetOk();
 
                 // Optional: nur bei Zustandswechsel ins File loggen
                 if (wasDown)

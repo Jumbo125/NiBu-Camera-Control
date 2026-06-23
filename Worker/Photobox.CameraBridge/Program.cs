@@ -15,6 +15,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using System.IO;
+using System.IO.Pipes;
 using System.Windows.Forms;
 using Photobox.CameraBridge.Core;
 using Photobox.CameraBridge.UI;
@@ -186,9 +187,6 @@ namespace Photobox.CameraBridge
 
                 logger.Info("IPC: using pipe name: " + pipeName);
 
-                ipc = new BridgeIpcServer(ipcWorker, pipeName: pipeName, log: s => logger.Info(s));
-                ipc.Start();
-
                 int shutdownDone = 0;
                 void ShutdownOnce()
                 {
@@ -200,6 +198,16 @@ namespace Photobox.CameraBridge
                     try { cameraHost.Dispose(); } catch { }            // 3) Kamera freigeben
                     try { mta.Dispose(); } catch { }                   // 4) Worker/Thread weg
                 }
+
+                // Graceful IPC shutdown: clean camera release then exit message loop.
+                void IpcShutdown()
+                {
+                    ShutdownOnce();
+                    try { Application.Exit(); } catch { }
+                }
+
+                ipc = new BridgeIpcServer(ipcWorker, pipeName: pipeName, log: s => logger.Info(s), onShutdown: IpcShutdown);
+                ipc.Start();
 
                 AppDomain.CurrentDomain.ProcessExit += (_, __) => ShutdownOnce();
 
@@ -344,7 +352,16 @@ namespace Photobox.CameraBridge
                             if (_opts.AutoRefresh)
                             {
                                 _log?.Info("AutoRefresh enabled -> Refreshing cameras...");
-                                await _cameraHost.RefreshAsync().ConfigureAwait(false);
+                                var refreshTask = _cameraHost.RefreshAsync();
+                                var winner = await Task.WhenAny(refreshTask, Task.Delay(TimeSpan.FromSeconds(10))).ConfigureAwait(false);
+                                if (winner != refreshTask)
+                                {
+                                    _log?.Warn("Camera refresh timed out after 10s — USB device may be unresponsive. Waiting 20s for camera to recover...");
+                                    // Give the camera time to release any leftover SDK handles from the previous process.
+                                    await Task.Delay(TimeSpan.FromSeconds(20)).ConfigureAwait(false);
+                                    _log?.Info("Retrying camera refresh after cooldown...");
+                                    try { await _cameraHost.RefreshAsync().ConfigureAwait(false); } catch { }
+                                }
                             }
 
                             if (_opts.AutoSelectCamera)
@@ -885,6 +902,18 @@ namespace Photobox.CameraBridge
 
         private static void KillOtherInstances(string exePath, RingLogger log, bool forceKill)
         {
+            // Resolve pipe name once — same appsettings.json is used by all instances.
+            string pipeName = null;
+            if (!forceKill)
+            {
+                try
+                {
+                    pipeName = ReadPipeNameFromAppSettingsJson(AppDomain.CurrentDomain.BaseDirectory)
+                               ?? Shared.PipeNames.CommandPipe;
+                }
+                catch { pipeName = Shared.PipeNames.CommandPipe; }
+            }
+
             try
             {
                 var cur = Process.GetCurrentProcess();
@@ -915,16 +944,23 @@ namespace Photobox.CameraBridge
                         var exited = false;
                         if (!forceKill)
                         {
+                            // 1) Try WM_CLOSE (works if main window is visible).
                             try
                             {
                                 if (p.CloseMainWindow())
                                     exited = p.WaitForExit(3000);
                             }
                             catch { }
+
+                            // 2) Try graceful IPC shutdown — lets the camera be disposed cleanly.
+                            if (!exited && pipeName != null)
+                                exited = TrySendShutdownIpcAndWait(pipeName, log, p);
                         }
 
+                        // 3) Hard kill as last resort.
                         if (!exited)
                         {
+                            log?.Warn($"OneInstance: forcing Kill() on PID {p.Id}.");
                             try { p.Kill(); } catch { }
                             try { p.WaitForExit(5000); } catch { }
                         }
@@ -937,6 +973,67 @@ namespace Photobox.CameraBridge
             {
                 log?.Warn("OneInstance: failed to enumerate/close instances: " + ex.Message);
             }
+        }
+
+        /// <summary>
+        /// Sends "worker.shutdown" via named pipe to the target process and waits up to 7 seconds for it to exit.
+        /// Returns true if the process exited cleanly.
+        /// </summary>
+        private static bool TrySendShutdownIpcAndWait(string pipeName, RingLogger log, Process targetProcess)
+        {
+            try
+            {
+                log?.Info($"OneInstance: sending IPC shutdown to PID {targetProcess.Id} via pipe '{pipeName}'...");
+
+                using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.None);
+                client.Connect(2000);
+
+                // Serialize PipeRequest manually (IpcJson is internal to WorkerIpc assembly).
+                var req = new Shared.PipeRequest { Cmd = Shared.Commands.Shutdown, Id = "sd" };
+                byte[] reqBytes;
+                using (var ms = new MemoryStream())
+                {
+                    var ser = new DataContractJsonSerializer(typeof(Shared.PipeRequest));
+                    ser.WriteObject(ms, req);
+                    reqBytes = ms.ToArray();
+                }
+
+                var lenBuf = BitConverter.GetBytes(reqBytes.Length);
+                client.Write(lenBuf, 0, 4);
+                client.Write(reqBytes, 0, reqBytes.Length);
+                client.Flush();
+
+                // Read the response so the server side can confirm dispatch before we wait.
+                try
+                {
+                    client.ReadTimeout = 3000;
+                    var lb = new byte[4];
+                    int total = 0, n;
+                    while (total < 4 && (n = client.Read(lb, total, 4 - total)) > 0) total += n;
+                    if (total == 4)
+                    {
+                        var rlen = BitConverter.ToInt32(lb, 0);
+                        if (rlen > 0 && rlen < 64 * 1024)
+                        {
+                            var rb = new byte[rlen];
+                            total = 0;
+                            while (total < rlen && (n = client.Read(rb, total, rlen - total)) > 0) total += n;
+                        }
+                    }
+                }
+                catch { }
+            }
+            catch (Exception ex)
+            {
+                log?.Warn("OneInstance: IPC shutdown failed: " + ex.Message);
+                return false;
+            }
+
+            log?.Info($"OneInstance: IPC shutdown sent, waiting for PID {targetProcess.Id} to exit (7s)...");
+            var exited = targetProcess.WaitForExit(7000);
+            if (!exited)
+                log?.Warn($"OneInstance: PID {targetProcess.Id} did not exit after IPC shutdown.");
+            return exited;
         }
 
         private static string SafeGetExePath()
