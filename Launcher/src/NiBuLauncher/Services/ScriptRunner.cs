@@ -105,7 +105,7 @@ public sealed class ScriptRunner
             await exitTask;
 
             // manchmal hilfreich, um letzte Output-Events zu flushen
-            try { p.WaitForExit(); } catch { }
+            try { p.WaitForExit(500); } catch { }
 
             var exit = p.ExitCode;
             var outText = stdout.ToString();

@@ -31,7 +31,8 @@ internal static class BridgeApiEndpointMappings
         BridgeSettings settings,
         DateTime startedUtc)
     {
-        app.MapGet("/", () => Results.Text($"OK. MJPEG: {settings.MjpegPath}\n", "text/plain"));
+        app.MapGet("/", () => Results.Text($"OK. MJPEG: {settings.MjpegPath}\n", "text/plain"))
+            .RequireCors(Program.CorsPolicyName);
 
         app.MapGet(
             settings.MjpegPath,
@@ -40,25 +41,14 @@ internal static class BridgeApiEndpointMappings
                 await MjpegStreamer.StreamAsync(ctx, ipc, stream, ctx.RequestAborted);
             }
         )
+            .RequireCors(Program.CorsPolicyName)
             .WithTags("LiveView");
 
         app.MapGet(
             "/api/status",
-            async (BridgePipeClient ipc, StreamState stream, WorkerHealthState health) =>
+            (StreamState stream, WorkerHealthState health) =>
             {
-                WorkerStatusDto? w = null;
-                try
-                {
-                    w = await ipc.CallAsync<WorkerStatusDto>(
-                        Commands.StatusGet,
-                        null,
-                        CancellationToken.None
-                    );
-                }
-                catch
-                {
-                }
-
+                var w = health.GetLastStatus();
                 var now = DateTime.UtcNow;
                 var hs = health.Snapshot();
 
@@ -114,7 +104,8 @@ internal static class BridgeApiEndpointMappings
                     Program.JsonOpts
                 );
             }
-        );
+        )
+            .RequireCors(Program.CorsPolicyName);
 
         app.MapGet(
             "/api/worker/reachable",
@@ -131,11 +122,12 @@ internal static class BridgeApiEndpointMappings
                     Program.JsonOpts
                 );
             }
-        );
+        )
+            .RequireCors(Program.CorsPolicyName);
 
         app.MapGet(
             "/api/worker/ping",
-            async (BridgePipeClient ipc) =>
+            async (HttpContext ctx, BridgePipeClient ipc) =>
             {
                 var sw = Stopwatch.StartNew();
                 try
@@ -143,7 +135,7 @@ internal static class BridgeApiEndpointMappings
                     _ = await ipc.CallAsync<WorkerStatusDto>(
                         Commands.StatusGet,
                         null,
-                        CancellationToken.None
+                        ctx.RequestAborted
                     );
                     return Results.Json(new { ok = true, ms = sw.ElapsedMilliseconds }, Program.JsonOpts);
                 }
@@ -164,9 +156,10 @@ internal static class BridgeApiEndpointMappings
 
         app.MapPost(
             "/api/worker/restart",
-            async (WorkerProcessManager pm) =>
+            async (WorkerProcessManager pm, WorkerHealthMonitor monitor) =>
             {
                 var res = await pm.EnsureStartedAsync("api_restart", CancellationToken.None);
+                if (res.ok) monitor.NotifyWorkerStarted();
                 return Results.Json(res, Program.JsonOpts);
             }
         );

@@ -27,7 +27,8 @@ public sealed class MainForm : Form
     private readonly DataGridView _statusGrid = new()
     {
         Dock = DockStyle.Top,
-        Height = 140,
+        Height = 220,
+        AutoSize = false,
         ReadOnly = true,
         AllowUserToAddRows = false,
         AllowUserToDeleteRows = false,
@@ -57,9 +58,12 @@ public sealed class MainForm : Form
     // UI refs
     private GroupBox? _grpControl;
     private Button? _btnStart, _btnStop, _btnRestart, _btnOpenApp, _btnOpenLogs, _btnAdvanced;
+    private CheckBox? _chkDebug;
     private Label? _lblStatus, _lblConsole;
     private Button? _btnRefresh;
     private ComboBox? _cmbLang;
+
+    private string DebugArg => _chkDebug?.Checked == true ? "/debug" : "/nopause";
 
     // Tray refs
     private ToolStripMenuItem? _trayOpen, _trayStart, _trayRestart, _trayStop, _trayOpenApp, _trayLogs, _trayExit;
@@ -134,7 +138,7 @@ public sealed class MainForm : Form
         _statusGrid.Rows.Add("Bridge API", "?", "?");
         _statusGrid.Rows.Add("Python", "?", "?");
 
-        Button Btn(out Button? field, Func<Task> onClick)
+        Button Btn(out Button? field, Func<Task> onClick, int unlockAfterSeconds = 30)
         {
             var b = new Button
             {
@@ -147,7 +151,15 @@ public sealed class MainForm : Form
             b.Click += async (_, _) =>
             {
                 b.Enabled = false;
-                try { await onClick(); }
+                try
+                {
+                    var work = onClick();
+                    // Observe exceptions from the task even if we time out before it finishes.
+                    _ = work.ContinueWith(
+                        t => { if (t.IsFaulted) AppendLog("[EX] " + t.Exception?.GetBaseException()); },
+                        TaskScheduler.Default);
+                    await Task.WhenAny(work, Task.Delay(TimeSpan.FromSeconds(unlockAfterSeconds)));
+                }
                 catch (Exception ex) { AppendLog("[EX] " + ex); }
                 finally { b.Enabled = true; }
             };
@@ -173,9 +185,20 @@ public sealed class MainForm : Form
             };
 
         var leftButtons = VerticalButtons();
-        leftButtons.Controls.Add(Btn(out _btnStart, () => RunScriptAsync("launcher\\start.bat", args: "/nopause", timeoutSeconds: 90)));
-        leftButtons.Controls.Add(Btn(out _btnStop, () => RunStopAsync()));
-        leftButtons.Controls.Add(Btn(out _btnRestart, () => RunRestartAsync()));
+        leftButtons.Controls.Add(Btn(out _btnStart, () => RunScriptAsync("launcher\\start.bat", args: DebugArg, timeoutSeconds: 90), unlockAfterSeconds: 95));
+        leftButtons.Controls.Add(Btn(out _btnStop, () => RunStopAsync(), unlockAfterSeconds: 30));
+        leftButtons.Controls.Add(Btn(out _btnRestart, () => RunRestartAsync(), unlockAfterSeconds: 125));
+
+        _chkDebug = new CheckBox
+        {
+            Width = 240,
+            Height = 24,
+            Margin = new Padding(0, 0, 0, 10),
+            Checked = false,
+            AutoSize = false,
+        };
+        leftButtons.Controls.Add(_chkDebug);
+
         leftButtons.Controls.Add(Btn(out _btnOpenApp, () => RunScriptAsync("launcher\\open_app.bat")));
         leftButtons.Controls.Add(Btn(out _btnOpenLogs, () => OpenLogsAsync()));
         leftButtons.Controls.Add(Btn(out _btnAdvanced, () => OpenAdvancedAsync()));
@@ -347,6 +370,7 @@ public sealed class MainForm : Form
         if (_btnStart != null) _btnStart.Text = _ui.T("btn.start");
         if (_btnStop != null) _btnStop.Text = _ui.T("btn.stop");
         if (_btnRestart != null) _btnRestart.Text = _ui.T("btn.restart");
+        if (_chkDebug != null) _chkDebug.Text = _ui.T("chk.debugMode");
         if (_btnOpenApp != null) _btnOpenApp.Text = _ui.T("btn.openApp");
         if (_btnOpenLogs != null) _btnOpenLogs.Text = _ui.T("btn.openLogs");
         if (_btnAdvanced != null) _btnAdvanced.Text = _ui.T("btn.advanced");
@@ -442,7 +466,7 @@ public sealed class MainForm : Form
     private async Task RunStopAsync()
     {
         await PauseWatchdogAsync(TimeSpan.FromMinutes(10), "GUI Stop");
-        await RunScriptAsync("launcher\\stop.bat", args: "/nopause");
+        await RunScriptAsync("launcher\\stop.bat", args: DebugArg);
     }
 
     private string WatchdogPauseFile => Path.Combine(AppContext.BaseDirectory, "launcher", "watchdog_pause.json");
@@ -467,8 +491,17 @@ public sealed class MainForm : Form
     private async Task RunRestartAsync()
     {
         await PauseWatchdogAsync(TimeSpan.FromMinutes(2), "GUI Restart");
-        await RunScriptAsync("launcher\\stop.bat", args: "/nopause");
-        await RunScriptAsync("launcher\\start.bat", args: "/nopause", timeoutSeconds: 90);
+        await RunScriptAsync("launcher\\stop.bat", args: DebugArg);
+        await RunScriptAsync("launcher\\start.bat", args: DebugArg, timeoutSeconds: 90);
+
+        void ReEnable()
+        {
+            if (_btnStart != null) _btnStart.Enabled = true;
+            if (_btnStop != null) _btnStop.Enabled = true;
+            if (_btnRestart != null) _btnRestart.Enabled = true;
+        }
+        if (InvokeRequired) BeginInvoke((Action)ReEnable);
+        else ReEnable();
     }
 
     private Task OpenAdvancedAsync()

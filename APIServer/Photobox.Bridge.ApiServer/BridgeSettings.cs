@@ -13,4 +13,5 @@ public sealed class BridgeSettings
     public string MjpegPath { get; set; } = "/live.mjpg";
     public string AuthKey { get; set; } = "";
     public string PipeName { get; set; } = "PhotoboxBridge.Cmd";
+    public string[] AllowedOrigins { get; set; } = [];
 }

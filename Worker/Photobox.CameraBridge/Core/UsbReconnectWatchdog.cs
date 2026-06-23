@@ -166,7 +166,10 @@ namespace Photobox.CameraBridge.Core
 
                 try
                 {
-                    await _host.RefreshAsync().ConfigureAwait(false);
+                    var refreshTask = _host.RefreshAsync();
+                    var winner = await Task.WhenAny(refreshTask, Task.Delay(TimeSpan.FromSeconds(8))).ConfigureAwait(false);
+                    if (winner != refreshTask)
+                        _log?.Warn("Watchdog: RefreshAsync timed out after 8s — USB device may be unresponsive.");
                 }
                 catch (Exception ex)
                 {

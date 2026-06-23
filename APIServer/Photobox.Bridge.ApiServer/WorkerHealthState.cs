@@ -10,6 +10,7 @@
 // - Fehlerstatus und Fehlermeldung speichern
 // - Snapshot für Statusabfragen bereitstellen
 using System;
+using Photobox.Bridge.Shared;
 
 namespace Photobox.Bridge.ApiServer;
 
@@ -22,13 +23,21 @@ public sealed class WorkerHealthState
     public DateTime? LastFailUtc { get; private set; }
     public string? LastError { get; private set; }
 
-    public void SetOk()
+    private WorkerStatusDto? _lastStatus;
+
+    public WorkerStatusDto? GetLastStatus()
+    {
+        lock (_lock) return _lastStatus;
+    }
+
+    public void SetOk(WorkerStatusDto? status = null)
     {
         lock (_lock)
         {
             Reachable = true;
             LastOkUtc = DateTime.UtcNow;
             LastError = null;
+            if (status != null) _lastStatus = status;
         }
     }
 
