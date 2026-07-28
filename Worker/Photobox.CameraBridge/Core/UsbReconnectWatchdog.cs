@@ -38,6 +38,10 @@ namespace Photobox.CameraBridge.Core
         private DateTime _lastAttemptUtc = DateTime.MinValue;
         private int _reconnectInProgress = 0;
 
+        // Gegen reine Wiederholungsmeldungen: nach X erfolglosen Versuchen einmal einen Hinweis loggen.
+        private const int HintAfterAttempts = 5; // ~5 * 2.5s = ~12.5s
+        private int _consecutiveFailedAttempts = 0;
+
         public UsbReconnectWatchdog(CameraHost host, RingLogger log)
         {
             _host = host ?? throw new ArgumentNullException(nameof(host));
@@ -178,7 +182,18 @@ namespace Photobox.CameraBridge.Core
 
                 if (!SafeHasCamera())
                 {
+                    _consecutiveFailedAttempts++;
                     _log?.Warn("Watchdog: still no camera.");
+
+                    if (_consecutiveFailedAttempts == HintAfterAttempts)
+                    {
+                        _log?.Warn("Watchdog: keine Kamera gefunden nach " + _consecutiveFailedAttempts +
+                            " Versuchen (~" + (int)(_consecutiveFailedAttempts * 2.5) + "s). " +
+                            "Falls die Kamera eingesteckt ist, aber trotzdem nicht gefunden wird: " +
+                            "sie ist evtl. ausgeschaltet, in einem schlechten USB-Zustand, oder der " +
+                            "USB-Port/Hub antwortet nicht mehr -> Stromversorgung/Kabel prüfen.");
+                    }
+
                     return;
                 }
 
@@ -192,6 +207,7 @@ namespace Photobox.CameraBridge.Core
                 }
 
                 _hadCamera = true;
+                _consecutiveFailedAttempts = 0;
                 _log?.Info("Watchdog: camera reconnected.");
 
                 if (_liveViewDesired)

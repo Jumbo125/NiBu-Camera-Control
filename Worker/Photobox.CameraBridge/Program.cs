@@ -92,18 +92,16 @@ namespace Photobox.CameraBridge
             var logger = new RingLogger(capacity: 5000);
             FileLogSink fileSink = null;
 
-            if (logEnabled)
-            {
-                try
-                {
-                    fileSink = new FileLogSink(logger, logPath);
-                    logger.Info("File logging enabled: " + logPath);
-                }
-                catch (Exception ex)
-                {
-                    logger.Warn("Failed to enable file logging: " + ex.Message);
-                }
-            }
+            // NOTE: the log file is intentionally NOT opened here yet.
+            // If --one-instance is active, a stale previous process may still be
+            // alive and holding its own FileStream open on the same logPath at this
+            // point. Opening our own Append-mode FileStream concurrently with that
+            // stale handle races the two writers' internal end-of-file tracking and
+            // can corrupt the file (observed: a multi-MB block of NUL bytes followed
+            // by a few KB of real log lines). So file logging is enabled further
+            // down, after EnsureSingleInstance() has evicted any stale instance.
+            // The debug-CLI path below is a short-lived one-shot invocation that
+            // never contends with another instance, so it opens the sink directly.
 
             // Global exception logging
             try
@@ -135,8 +133,28 @@ namespace Photobox.CameraBridge
 
             if (TryParseDebugCli(args, out var debugCli))
             {
-                var exitCode = RunDebugCliAsync(debugCli, logger).GetAwaiter().GetResult();
-                Environment.ExitCode = exitCode;
+                if (logEnabled)
+                {
+                    try
+                    {
+                        fileSink = new FileLogSink(logger, logPath);
+                        logger.Info("File logging enabled: " + logPath);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.Warn("Failed to enable file logging: " + ex.Message);
+                    }
+                }
+
+                try
+                {
+                    var exitCode = RunDebugCliAsync(debugCli, logger).GetAwaiter().GetResult();
+                    Environment.ExitCode = exitCode;
+                }
+                finally
+                {
+                    try { fileSink?.Dispose(); } catch { }
+                }
                 return;
             }
 
@@ -152,6 +170,21 @@ namespace Photobox.CameraBridge
             {
                 if (opts.OneInstance)
                     oneInstanceMutex = EnsureSingleInstance(logger, out oneInstanceMutexOwned);
+
+                // Safe to open the log file now: any stale previous instance has
+                // been evicted (see comment above about the Append-mode race).
+                if (logEnabled)
+                {
+                    try
+                    {
+                        fileSink = new FileLogSink(logger, logPath);
+                        logger.Info("File logging enabled: " + logPath);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.Warn("Failed to enable file logging: " + ex.Message);
+                    }
+                }
 
                 var settings = AppSettingsLoader.LoadOrDefault(
                     baseDir: AppDomain.CurrentDomain.BaseDirectory,
