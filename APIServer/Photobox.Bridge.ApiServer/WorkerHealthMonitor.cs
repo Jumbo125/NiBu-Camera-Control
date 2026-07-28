@@ -51,6 +51,12 @@ public sealed class WorkerHealthMonitor : BackgroundService
     private const int StartupGraceMs    = 15000;  // Zeit geben nach Start
     private const int MinDownMsBeforeRestart = 20000; // erst nach 20s "wirklich down" neu starten
 
+    // Diagnose-Hinweise gegen reine Wiederholungsmeldungen ohne Mehrwert.
+    private const int HintAfterFails = 5;          // ~10s Dauerfehler -> einmaliger Hinweis pro Down-Episode
+    private const int EscalationRestartCount = 3;  // ab X Neustarts ohne Recovery -> Hardware-Hinweis
+    private bool _hintLoggedThisEpisode = false;
+    private int _restartsWithoutRecovery = 0;
+
     public WorkerHealthMonitor(
         BridgePipeClient ipc,
         WorkerHealthState state,
@@ -120,6 +126,8 @@ public sealed class WorkerHealthMonitor : BackgroundService
 
                 _failsInRow = 0;
                 _downSinceUtc = null;
+                _hintLoggedThisEpisode = false;
+                _restartsWithoutRecovery = 0;
 
                 // Optional: nur bei Zustandswechsel ins File loggen
                 if (wasDown)
@@ -152,6 +160,24 @@ public sealed class WorkerHealthMonitor : BackgroundService
                 _downSinceUtc ??= now;
                 var downForMs = (now - _downSinceUtc.Value).TotalMilliseconds;
 
+                // Reine Wiederholung von "not reachable" bringt nach ein paar Malen nichts mehr -
+                // einmal pro Down-Episode einen Hinweis loggen, was das wahrscheinlich bedeutet.
+                if (!_hintLoggedThisEpisode && _failsInRow >= HintAfterFails)
+                {
+                    _hintLoggedThisEpisode = true;
+                    try
+                    {
+                        _log.Warning(
+                            "Worker pipe seit {Fails} Versuchen (~{Sec}s) nicht erreichbar. Wahrscheinlichste " +
+                            "Ursache: Kamera/USB-Gerät ist zwar physisch vorhanden, antwortet aber nicht mehr " +
+                            "(SDK-Aufruf hängt), nicht ein abgestürzter Worker-Prozess. Falls das nicht von " +
+                            "selbst wieder geht, wird nach {DownMs}ms automatisch ein USB-Reset (Klasse " +
+                            "WPD/Camera/Image) versucht und der Worker neu gestartet.",
+                            _failsInRow, (int)(downForMs / 1000.0), MinDownMsBeforeRestart);
+                    }
+                    catch { }
+                }
+
                 // Autostart: nur wenn "wirklich down" UND nicht in Grace UND nicht zu oft UND nicht parallel
                 var threshold = Math.Max(1, _worker.FailThreshold);
                 var inGrace = now < _startupGraceUntilUtc;
@@ -166,10 +192,37 @@ public sealed class WorkerHealthMonitor : BackgroundService
                     _nextStartAllowedUtc = now.AddMilliseconds(RestartCooldownMs);
                     _startupGraceUntilUtc = now.AddMilliseconds(StartupGraceMs);
 
+                    _restartsWithoutRecovery++;
+                    if (_restartsWithoutRecovery >= EscalationRestartCount)
+                    {
+                        try
+                        {
+                            _log.Warning(
+                                "Worker wurde {Count}x hintereinander neu gestartet, ohne dass die Verbindung " +
+                                "stabil wiederkam. Das deutet auf ein Hardware-/USB-Problem hin (Kamera aus, " +
+                                "Kabel/Hub locker, Gerät hängt), nicht auf einen Software-Bug im Worker — " +
+                                "bitte Kamera-Stromversorgung und USB-Verbindung prüfen.",
+                                _restartsWithoutRecovery);
+                        }
+                        catch { }
+                    }
+
                     _ = Task.Run(async () =>
                     {
                         try
                         {
+                            try
+                            {
+                                var (found, resetOk) = UsbCameraReset.ResetCameraClassDevices(_log);
+                                _log.Information(
+                                    "Worker unreachable -> USB-Kamera-Reset vor Neustart versucht (found={Found}, ok={Ok}).",
+                                    found, resetOk);
+                            }
+                            catch (Exception ex)
+                            {
+                                try { _log.Warning(ex, "USB-Kamera-Reset fehlgeschlagen."); } catch { }
+                            }
+
                             await _pm.EnsureStartedAsync("pipe_unreachable", CancellationToken.None);
                         }
                         catch (Exception ex)
