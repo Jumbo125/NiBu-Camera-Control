@@ -45,6 +45,48 @@ namespace Photobox.CameraBridge.Core
         public LiveViewPump LiveView { get; }
         public bool HttpStreamingEnabled { get; set; }
 
+        // Thread-sicherer, gecachter Snapshot der zuletzt bekannten Kamera-Infos. Wird am Ende
+        // jedes erfolgreichen RefreshAsync()/SelectCamera()/SelectCameraBySerial() auf dem
+        // MTA-Thread aktualisiert. GetStatusSnapshot() liest NUR diesen Cache, damit ein
+        // Health-Ping (GetStatusAsync) niemals auf dem MTA-Thread blockieren kann, selbst wenn
+        // der gerade in Manager.ConnectToCamera() gegen eine wedged Kamera hängt.
+        private readonly object _snapshotLock = new object();
+        private CameraSnapshot _snapshot = CameraSnapshot.Empty;
+
+        public CameraSnapshot GetStatusSnapshot()
+        {
+            lock (_snapshotLock)
+                return _snapshot;
+        }
+
+        private void UpdateSnapshotUnsafe()
+        {
+            var cam = Manager.SelectedCameraDevice;
+            var snap = cam == null
+                ? CameraSnapshot.Empty
+                : new CameraSnapshot
+                {
+                    SelectedId = GetSelectedCameraIdUnsafe(),
+                    DisplayName = cam.DisplayName,
+                    Manufacturer = cam.Manufacturer,
+                    Model = cam.DeviceName,
+                    Serial = cam.SerialNumber
+                };
+
+            lock (_snapshotLock)
+                _snapshot = snap;
+
+            if (cam != null)
+                _cameraResponsive = true;
+        }
+
+        // Kamera-Gesundheit getrennt von Prozess-/Snapshot-Liveness: wird auf false gesetzt,
+        // sobald LiveViewPump meldet, dass die Kamera wiederholt nicht mehr reagiert (Stuck),
+        // und wieder auf true, sobald ein Refresh/Select erneut erfolgreich eine Kamera liefert.
+        // GetStatusSnapshot()-Konsumenten (Health-Ping) lesen dies lock-frei mit.
+        private volatile bool _cameraResponsive = true;
+        public bool CameraResponsive => _cameraResponsive;
+
         public CameraHost(MtaWorker mta, RingLogger log, CameraMap map, AppSettings settings)
         {
             _mta = mta;
@@ -59,6 +101,7 @@ namespace Photobox.CameraBridge.Core
             };
 
             LiveView = new LiveViewPump(_mta, _log, _settings);
+            LiveView.Stuck += () => _cameraResponsive = false;
         }
 
         public async Task RefreshAsync()
@@ -69,6 +112,7 @@ namespace Photobox.CameraBridge.Core
                 ApplyOverrides();
                 ApplyNikonFallbackForConnectedModels();
                 Manager.ConnectToCamera();
+                UpdateSnapshotUnsafe();
             }).ConfigureAwait(false);
 
             _log.Info($"Refresh done. Found: {Manager.ConnectedDevices.Count} camera(s).");
@@ -249,6 +293,7 @@ namespace Photobox.CameraBridge.Core
                     _log.Info($"Selected SDK type: {cam?.GetType().FullName}");
                     _log.Info($"Selected maker/model: {cam?.Manufacturer} / {cam?.DeviceName}");
 
+                    UpdateSnapshotUnsafe();
                     return true;
                 }).GetAwaiter().GetResult();
             }
@@ -313,6 +358,7 @@ namespace Photobox.CameraBridge.Core
                     _log.Info($"Selected SDK type: {cam?.GetType().FullName}");
                     _log.Info($"Selected maker/model: {cam?.Manufacturer} / {cam?.DeviceName}");
 
+                    UpdateSnapshotUnsafe();
                     return true;
                 }).GetAwaiter().GetResult();
             }
@@ -953,6 +999,19 @@ namespace Photobox.CameraBridge.Core
 
                 if (profile == CameraProfile.NikonDslr)
                 {
+                    // Redundante externe Aufrufe (LiveView läuft schon) NICHT mehr hart
+                    // durchziehen: ein bereits laufender Nikon-LiveView wurde hier bisher bei
+                    // jedem erneuten Aufruf (z.B. periodischer Keepalive-Ping) komplett gestoppt
+                    // und neu gestartet. Nach mehreren solchen Zyklen ohne jeden Auslöser durch
+                    // den Nutzer konnte das zuverlässig in "MTP device busy" enden. Der
+                    // absichtliche Stop/Restart rund um einen Capture (CaptureWithTemporarySettingsAsync)
+                    // läuft über einen anderen Pfad und ist davon nicht betroffen.
+                    if (LiveView.IsRunning)
+                    {
+                        _log.Info("StartLiveView skipped (Nikon, already running) - avoiding redundant hard restart.");
+                        return;
+                    }
+
                     StopLiveViewHardAsync().GetAwaiter().GetResult();
                     LiveView.Start(cam, FrameHub);
                     return;
@@ -983,6 +1042,89 @@ namespace Photobox.CameraBridge.Core
             {
                 _switchGate.Release();
             }
+        }
+
+        /// <summary>
+        /// Schließt die SDK-Verbindung zur aktuell ausgewählten Kamera hart (cam.Close()), statt nur
+        /// LiveView zu stoppen. Wird für einen "harten" Reconnect benötigt: Wenn die Kamera in einen
+        /// dauerhaften "MTP device busy"-Zustand gerät, hilft ein simples Stop/Start auf demselben
+        /// SDK-Handle nicht mehr - der Transport muss neu aufgebaut werden. Danach sollte RefreshAsync()
+        /// aufgerufen werden, damit CameraDeviceManager das Gerät neu enumeriert.
+        /// Best-effort: Fehler werden geloggt, aber nicht weitergeworfen.
+        /// </summary>
+        public void TryCloseSelectedCameraConnection()
+        {
+            try
+            {
+                _mta.InvokeAsync(() =>
+                {
+                    var cam = Manager.SelectedCameraDevice;
+                    if (cam == null)
+                        return;
+
+                    try { cam.StopLiveView(); } catch { }
+                    try { cam.PreventShutDown = false; } catch { }
+                    try { cam.Close(); }
+                    catch (Exception ex) { _log.Warn("TryCloseSelectedCameraConnection: cam.Close() failed: " + ex.Message); }
+                }).GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                _log.Warn("TryCloseSelectedCameraConnection failed: " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Harte Kamera-Recovery für einen dauerhaften "MTP device busy"-Zustand, aus dem
+        /// Stop/Start auf demselben SDK-Handle nicht mehr herausführt: LiveView stoppen,
+        /// SDK-Verbindung schließen, Geräte neu enumerieren und - falls vorhanden - wieder
+        /// Kamera 0 auswählen (analog zum UsbReconnectWatchdog bei LiveView.Stuck).
+        /// Der RefreshAsync ist per Timeout abgesichert, damit der Aufrufer bei weiterhin
+        /// wedged Kamera nicht unbegrenzt wartet. Best-effort; true, wenn danach wieder eine
+        /// Kamera ausgewählt ist. Achtung: NICHT aufrufen, während _captureGate gehalten wird
+        /// (SelectCamera nimmt es selbst) - der Capture-Pfad ruft dies zwischen zwei Versuchen
+        /// auf, wenn das Gate wieder frei ist.
+        /// </summary>
+        public async Task<bool> TryHardRecoverAsync()
+        {
+            try { LiveView.Stop(); } catch { }
+            try { TryCloseSelectedCameraConnection(); } catch { }
+
+            try
+            {
+                var refreshTask = RefreshAsync();
+                var winner = await Task.WhenAny(refreshTask, Task.Delay(TimeSpan.FromSeconds(8))).ConfigureAwait(false);
+                if (winner != refreshTask)
+                {
+                    _log.Warn("TryHardRecoverAsync: RefreshAsync timed out after 8s - camera still unresponsive.");
+                    return false;
+                }
+                await refreshTask.ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _log.Warn("TryHardRecoverAsync: RefreshAsync failed: " + ex.Message);
+                return false;
+            }
+
+            try
+            {
+                var list = GetCameraList();
+                if (list != null && list.Count > 0)
+                {
+                    SelectCamera(0);
+                    _log.Info("TryHardRecoverAsync: camera reselected after hard reconnect.");
+                    return true;
+                }
+
+                _log.Warn("TryHardRecoverAsync: no camera found after refresh.");
+            }
+            catch (Exception ex)
+            {
+                _log.Warn("TryHardRecoverAsync: SelectCamera(0) failed: " + ex.Message);
+            }
+
+            return false;
         }
 
         public void Dispose()
@@ -1017,6 +1159,23 @@ namespace Photobox.CameraBridge.Core
         public string Serial { get; set; }
         public string Port { get; set; }
         public bool IsConnected { get; set; }
+    }
+
+    /// <summary>
+    /// Gecachter, thread-sicher lesbarer Snapshot der zuletzt bekannten Kamera-Auswahl.
+    /// Wird ausschließlich auf dem MTA-Thread geschrieben (siehe CameraHost.UpdateSnapshotUnsafe)
+    /// und lock-frei bzw. per einfachem lock von jedem Thread gelesen - insbesondere vom
+    /// Health-Ping, der niemals auf den MTA-Thread blockieren darf.
+    /// </summary>
+    public sealed class CameraSnapshot
+    {
+        public static readonly CameraSnapshot Empty = new CameraSnapshot();
+
+        public int? SelectedId { get; set; }
+        public string DisplayName { get; set; }
+        public string Manufacturer { get; set; }
+        public string Model { get; set; }
+        public string Serial { get; set; }
     }
 
     public sealed class CameraSettingsDto

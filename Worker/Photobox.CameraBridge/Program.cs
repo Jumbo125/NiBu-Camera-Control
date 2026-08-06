@@ -207,6 +207,33 @@ namespace Photobox.CameraBridge
                 var mta = new MtaWorker(logger);
                 var cameraHost = new CameraHost(mta, logger, cameraMap, settings);
 
+                // MTA-Stuck-Watchdog: der SDK-Worker-Thread (MtaWorker) serialisiert alle
+                // Kamera-Operationen streng und kennt kein echtes Cancellation einer laufenden
+                // SDK-Aktion. Haengt eine einzelne Aktion (z.B. eine Geraete-Enumeration bei
+                // bereits verklemmter Kamera, ausgeloest ueber CameraHost.TryHardRecoverAsync),
+                // bleibt dieser Thread fuer immer belegt und JEDE folgende Kamera-Operation
+                // (auch spaetere Captures) haengt dann ebenfalls - ohne dass der separate
+                // Health-Ping-Kanal (der bewusst nicht ueber den MTA-Thread laeuft) das
+                // bemerkt. Statt endlos zu haengen: Prozess hart beenden, damit der ApiServer
+                // (WorkerHealthMonitor) den toten Pipe-Client erkennt und den Worker neu startet.
+                var mtaStuckThreshold = TimeSpan.FromSeconds(30);
+                var mtaStuckWatchdog = new System.Threading.Timer(_ =>
+                {
+                    if (!mta.IsPossiblyStuck(mtaStuckThreshold)) return;
+
+                    try
+                    {
+                        logger.Error($"MTA worker thread appears stuck for > {mtaStuckThreshold.TotalSeconds}s " +
+                                     "(likely a hung SDK call, e.g. device enumeration on a wedged camera). " +
+                                     "Forcing process exit so the supervisor can restart the worker.", null);
+                    }
+                    catch { }
+
+                    // Bewusst kein graceful ShutdownOnce(): das wuerde selbst ueber mta/cameraHost
+                    // laufen und koennte am selben haengenden Thread haengen bleiben.
+                    Environment.Exit(1);
+                }, null, dueTime: TimeSpan.FromSeconds(15), period: TimeSpan.FromSeconds(5));
+
                 // USB Watchdog
                 watchdog = new UsbReconnectWatchdog(cameraHost, logger) { Enabled = true };
                 watchdog.SetLiveViewDesired(opts.AutoStartLiveView);
@@ -225,6 +252,7 @@ namespace Photobox.CameraBridge
                 {
                     if (Interlocked.Exchange(ref shutdownDone, 1) == 1) return;
 
+                    try { mtaStuckWatchdog?.Dispose(); } catch { }     // -1) MTA-Watchdog stoppen
                     try { ipc?.Dispose(); } catch { }                  // 0) IPC stoppen
                     try { watchdog?.Dispose(); } catch { }             // 1) Watchdog stoppen
                     try { cameraHost.StopLiveView(); } catch { }       // 2) LiveView stoppen
@@ -393,7 +421,20 @@ namespace Photobox.CameraBridge
                                     // Give the camera time to release any leftover SDK handles from the previous process.
                                     await Task.Delay(TimeSpan.FromSeconds(20)).ConfigureAwait(false);
                                     _log?.Info("Retrying camera refresh after cooldown...");
-                                    try { await _cameraHost.RefreshAsync().ConfigureAwait(false); } catch { }
+
+                                    // Gleicher Timeout-Schutz wie beim ersten Versuch (FIX_PLAN.md Fix 5).
+                                    // WICHTIG: der Timeout befreit den MTA-Thread NICHT (ein bereits
+                                    // dispatchter STA-Call ist nicht abbrechbar) - er verhindert nur, dass
+                                    // dieser Aufrufer hier unbegrenzt wartet, falls auch der zweite Versuch
+                                    // gegen eine weiterhin wedged Kamera hängt.
+                                    try
+                                    {
+                                        var retryTask = _cameraHost.RefreshAsync();
+                                        var retryWinner = await Task.WhenAny(retryTask, Task.Delay(TimeSpan.FromSeconds(10))).ConfigureAwait(false);
+                                        if (retryWinner != retryTask)
+                                            _log?.Warn("Camera refresh retry also timed out after 10s — giving up, watchdog will keep trying.");
+                                    }
+                                    catch { }
                                 }
                             }
 
