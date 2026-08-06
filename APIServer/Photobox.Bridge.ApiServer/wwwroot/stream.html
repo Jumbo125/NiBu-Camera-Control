@@ -1,0 +1,259 @@
+<!--
+    =====================================================================
+    CameraBridge Stream – URL / Domain Hinweise
+    =====================================================================
+
+    Diese Datei (stream.html) wird IMMER über die WebUI geladen:
+      - Origin / Domain:
+          http://127.0.0.1:8050
+      - Pfad:
+          /tools/camerabridge/stream.html
+
+    Der eigentliche MJPEG-Videostream kommt NICHT von der WebUI,
+    sondern DIREKT vom CameraBridge-Server:
+
+      - MJPEG Stream:
+          http://127.0.0.1:8052/live.mjpg
+
+    Wichtig:
+    - stream.html ist nur ein Anzeige-Container (View)
+    - stream.html pollt KEINE APIs
+    - stream.html startet den Stream nur:
+        a) nach window.updateStatus(...) vom Parent
+        b) ODER explizit mit ?standalone=1
+
+    Typische Aufrufe:
+
+      IFRAME / APP (Produktiv, Push-Modell):
+        /tools/camerabridge/stream.html?port=8052
+
+      Standalone / Debug:
+        /tools/camerabridge/stream.html?port=8052&standalone=1&debug=1
+
+    =====================================================================
+  -->
+<!DOCTYPE html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <title>Photobox Live</title>
+
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        font-family: Arial, sans-serif;
+        background: #000;
+      }
+
+      img#lv {
+        display: none;
+        max-width: 100%;
+      }
+
+      /* Fullscreen Layout */
+      .full_img img#lv {
+        width: 100vw;
+        height: auto;
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+      }
+
+      #ok,
+      #err {
+        position: absolute;
+        left: 12px;
+        right: 12px;
+        padding: 8px;
+        display: none;
+        z-index: 5;
+        font-size: 14px;
+      }
+
+      #ok {
+        top: 12px;
+        border: 1px solid #0a0;
+        background: #efe;
+        color: #040;
+      }
+
+      #err {
+        top: 12px;
+        border: 1px solid #c00;
+        background: #fee;
+        color: #600;
+      }
+
+      /* Debug aus */
+      .no_debug #ok,
+      .no_debug #err {
+        display: none !important;
+      }
+
+      /* Mirror nur auf Meldungen */
+      .mirror #ok,
+      .mirror #err {
+        transform: scaleX(-1);
+        transform-origin: center;
+      }
+    </style>
+  </head>
+
+  <body>
+    <img id="lv" alt="LiveView" />
+    <div id="ok"></div>
+    <div id="err"></div>
+
+    <script>
+      // ------------------------------------------------------------------
+      // Helpers
+      // ------------------------------------------------------------------
+      const okEl = document.getElementById("ok");
+      const errEl = document.getElementById("err");
+      const lv = document.getElementById("lv");
+      lv.addEventListener("load", () => {
+        if (lv.dataset.running === "1") {
+          lv.style.display = "block"; // erst jetzt sichtbar -> kein broken icon
+        }
+      });
+
+      function showOk(msg) {
+        errEl.style.display = "none";
+        okEl.textContent = msg || "";
+        okEl.style.display = "block";
+      }
+
+      function showErr(msg) {
+        okEl.style.display = "none";
+        errEl.textContent = msg || "";
+        errEl.style.display = "block";
+      }
+
+      function startLive() {
+        if (lv.dataset.running === "1") return;
+        if (!window.LIVE_URL) return;
+
+        lv.style.display = "none"; // <-- wichtig: bis zum ersten Frame verstecken
+
+        // optional: cache-bust, damit Reconnect sicher neu startet
+        const url =
+          window.LIVE_URL +
+          (window.LIVE_URL.includes("?") ? "&" : "?") +
+          "t=" +
+          Date.now();
+
+        lv.src = url;
+        lv.dataset.running = "1";
+      }
+
+      function stopLive() {
+        if (lv.dataset.running !== "1") return;
+
+        lv.removeAttribute("src");
+        lv.dataset.running = "0";
+        lv.style.display = "none";
+      }
+
+      // ------------------------------------------------------------------
+      // URL Parameter
+      // ------------------------------------------------------------------
+      const params = new URLSearchParams(window.location.search);
+
+      function parseBool(v) {
+        if (v == null) return false;
+        return ["1", "true", "yes", "y", "on"].includes(
+          String(v).toLowerCase()
+        );
+      }
+
+      const debug =
+        parseBool(params.get("debug")) || parseBool(params.get("debug_mode"));
+      const mirror =
+        parseBool(params.get("mirror")) ||
+        parseBool(params.get("preview_mirror"));
+      const fullImg = parseBool(params.get("full_img"));
+      const standalone = parseBool(params.get("standalone")); // 🔑 NEU
+
+      if (!debug) document.body.classList.add("no_debug");
+      if (mirror) document.body.classList.add("mirror");
+      if (fullImg) document.body.classList.add("full_img");
+
+      // ------------------------------------------------------------------
+      // LiveView URL
+      // ------------------------------------------------------------------
+      const host = params.get("host") || "127.0.0.1";
+      const port = Number(params.get("port")) || 8052;
+      window.LIVE_URL = `http://${host}:${port}/live.mjpg`;
+
+      // ------------------------------------------------------------------
+      // 🔑 API für Parent (iframe-Modus)
+      // ------------------------------------------------------------------
+      window.updateStatus = function (s) {
+        if (standalone) return; // Parent hat im Standalone-Modus keine Autorität
+
+        if (!s || typeof s !== "object") {
+          stopLive();
+          showErr("Kein Status verfügbar");
+          return;
+        }
+
+        if (!s.selected) {
+          stopLive();
+          showErr("Keine Kamera ausgewählt");
+          return;
+        }
+
+        if (!s.liveViewRunning) {
+          stopLive();
+          showErr("LiveView läuft nicht");
+          return;
+        }
+
+        if (!s.framesActive) {
+          stopLive();
+          showErr("Keine LiveView-Frames");
+          return;
+        }
+
+        const age = s.frameAgeMs != null ? ` (age=${s.frameAgeMs}ms)` : "";
+        showOk(`OK: ${s.selected}${age}`);
+        startLive();
+      };
+
+      // ------------------------------------------------------------------
+      // Standalone-Fallback (NUR wenn explizit erlaubt)
+      // ------------------------------------------------------------------
+      if (standalone) {
+        console.warn("[stream] standalone mode enabled");
+        setTimeout(() => {
+          showOk("Standalone LiveView");
+          startLive();
+        }, 200);
+      }
+
+      // ------------------------------------------------------------------
+      // Optional: Initial-Text per GET (rein statisch)
+      // ------------------------------------------------------------------
+      const initState = params.get("state"); // ok | error
+      const initText = params.get("text");
+
+      if (initState === "error") {
+        showErr(initText || "Nicht verbunden");
+      } else if (initState === "ok") {
+        showOk(initText || "Verbunden");
+      }
+
+      // ------------------------------------------------------------------
+      // Fehler am MJPEG selbst
+      // ------------------------------------------------------------------
+      lv.addEventListener("error", () => {
+        stopLive();
+        showErr("LiveView-Stream nicht verfügbar");
+      });
+    </script>
+  </body>
+</html>

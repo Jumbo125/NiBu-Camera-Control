@@ -18,7 +18,7 @@ using Photobox.Bridge.Shared;
 
 namespace Photobox.Bridge.ApiServer;
 
-public sealed class BridgePipeClient : IAsyncDisposable
+public class BridgePipeClient : IAsyncDisposable
 {
     private readonly string _pipeName;
     private NamedPipeClientStream? _pipe;
@@ -193,6 +193,20 @@ public sealed class BridgePipeClient : IAsyncDisposable
             total += n;
         }
         return total;
+    }
+}
+
+/// <summary>
+/// Eigene BridgePipeClient-Instanz nur für den WorkerHealthMonitor: eigene Pipe-Verbindung,
+/// eigenes Gate. Verhindert, dass ein Capture/Refresh/WaitNextFrame-Longpoll auf dem
+/// Kommando-Kanal den Health-Ping blockiert, indem beide Kanäle komplett getrennt sind
+/// (siehe FIX_PLAN.md Fix 2). Der Kommando-Pfad (BridgeApiEndpointMappings etc.) nutzt weiterhin
+/// den normalen BridgePipeClient-Singleton.
+/// </summary>
+public sealed class HealthPipeClient : BridgePipeClient
+{
+    public HealthPipeClient(IOptions<BridgeSettings> settings) : base(settings)
+    {
     }
 }
 

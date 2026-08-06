@@ -46,7 +46,11 @@ public sealed class BridgeIpcServer : IDisposable
     {
         while (!ct.IsCancellationRequested)
         {
-            using var server = new NamedPipeServerStream(
+            // Eigene server-Instanz PRO Verbindung: darf hier NICHT disposed werden, sobald wir
+            // sofort die nächste WaitForConnectionAsync starten - die Lifetime hängt jetzt am
+            // Handler-Task (try/finally dort), sonst würde ein "using" hier die Instanz disposen,
+            // während HandleClientAsync noch auf ihr liest/schreibt (siehe FIX_PLAN.md Fix 3).
+            var server = new NamedPipeServerStream(
                 _pipeName,
                 PipeDirection.InOut,
                 NamedPipeServerStream.MaxAllowedServerInstances,
@@ -58,14 +62,39 @@ public sealed class BridgeIpcServer : IDisposable
                 await server.WaitForConnectionAsync(ct).ConfigureAwait(false);
                 _log?.Invoke("IPC: client connected");
 
-                await HandleClientAsync(server, ct).ConfigureAwait(false);
+                // Mehrere Verbindungen gleichzeitig bedienen (z.B. Kommando-Kanal + separater
+                // Health-Ping-Kanal): sofort die nächste Verbindung annehmen, statt auf das
+                // Ende dieser einen zu warten. SDK-Aufrufe bleiben über den MtaWorker
+                // serialisiert - die Nebenläufigkeit hier betrifft nur IPC-Lesen/Schreiben.
+                _ = Task.Run(() => HandleClientConnectionAsync(server, ct), ct);
             }
-            catch (OperationCanceledException) { }
+            catch (OperationCanceledException)
+            {
+                try { server.Dispose(); } catch { }
+            }
             catch (Exception ex)
             {
+                try { server.Dispose(); } catch { }
                 _log?.Invoke("IPC: accept loop error: " + ex);
                 await Task.Delay(200, ct).ConfigureAwait(false);
             }
+        }
+    }
+
+    private async Task HandleClientConnectionAsync(NamedPipeServerStream server, CancellationToken ct)
+    {
+        try
+        {
+            await HandleClientAsync(server, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            _log?.Invoke("IPC: client handler error: " + ex);
+        }
+        finally
+        {
+            try { server.Dispose(); } catch { }
         }
     }
 
