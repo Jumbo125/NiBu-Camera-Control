@@ -357,6 +357,15 @@ public static partial class Program
             return new BridgePipeClient(opts);
         });
 
+        // Eigener Pipe-Kanal nur für den Health-Ping (siehe WorkerHealthMonitor/HealthPipeClient):
+        // eigene Verbindung + eigenes Gate, damit Capture/Refresh/Longpoll auf dem
+        // Kommando-Singleton oben den Health-Ping nicht mehr serialisieren (FIX_PLAN.md Fix 2).
+        builder.Services.AddSingleton<HealthPipeClient>(sp =>
+        {
+            var opts = sp.GetRequiredService<IOptions<BridgeSettings>>();
+            return new HealthPipeClient(opts);
+        });
+
         builder.Services.AddSingleton<StreamState>();
         builder.Services.AddSingleton<WorkerHealthState>();
         builder.Services.AddSingleton<WorkerProcessManager>();

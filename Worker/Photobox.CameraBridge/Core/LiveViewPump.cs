@@ -32,6 +32,35 @@ namespace Photobox.CameraBridge.Core
         // Dynamisch verstellbare FPS (thread-safe)
         private int _targetFps;
 
+        // Zählt aufeinanderfolgende gescheiterte "no frames -> restart"-Versuche.
+        // Wird bei jedem erfolgreichen Frame-Empfang bzw. Neustart zurückgesetzt.
+        private int _consecutiveRestartFailures;
+
+        private const int StuckAfterFailures = 5;
+
+        // Beobachtung im Log: direkt nach einem frischen Reconnect (mit oder ohne PnP-Reset)
+        // schlägt der ALLERERSTE StartLiveView-Aufruf öfter einmalig transient fehl ("Invalid
+        // status" 0xA004, oder ein Shutdown-COMException-Muster) - offenbar eine kurze
+        // Race zwischen SDK-Session-Aufbau und dem ersten Kommando, die sich fast immer nach
+        // einem kurzen Moment von selbst löst (siehe z.B. 09:45:23 im Log: attempt 1 schlägt
+        // fehl, unmittelbar danach läuft alles normal weiter - kein Reconnect nötig). Weil der
+        // Fehlerzähler oben bewusst NICHT pro Start() zurückgesetzt wird (siehe Start()), reißt
+        // genau dieser eine transiente Fehler nach einem Reconnect sofort wieder die
+        // StuckAfterFailures-Schwelle und löst einen weiteren vollen harten Reconnect aus -
+        // beobachtet als 3-4 PnP-Resets hintereinander für ein einziges Vorfall. Ein kurzer,
+        // lokaler Retry NUR für den initialen Start (unten) fängt das ab, bevor es überhaupt
+        // als Fehlversuch gezählt wird.
+        private const int InitialStartRetryAttempts = 3;
+        private static readonly TimeSpan InitialStartRetryDelay = TimeSpan.FromMilliseconds(600);
+
+        /// <summary>
+        /// Wird ausgelöst, wenn LiveView wiederholt (siehe StuckAfterFailures) nicht neu gestartet
+        /// werden konnte (z.B. dauerhaftes "MTP device busy"). Konsumenten (z.B. UsbReconnectWatchdog)
+        /// können darauf mit einem harten Reconnect reagieren, da ein simples Stop/Start auf demselben
+        /// SDK-Handle in diesem Zustand nichts mehr bewirkt.
+        /// </summary>
+        public event Action Stuck;
+
         public bool IsRunning => _task != null && !_task.IsCompleted;
 
         public int TargetFps
@@ -66,8 +95,32 @@ namespace Photobox.CameraBridge.Core
             if (hub == null) throw new ArgumentNullException(nameof(hub));
             if (IsRunning) return;
 
-            _cts = new CancellationTokenSource();
-            _task = Task.Run(() => RunLoop(cam, hub, _cts.Token));
+            // WICHTIG: den Fehlerzähler hier NICHT zurücksetzen. Wenn die Kamera in einen
+            // dauerhaften "MTP device busy"-Zustand kippt, stößt der Aufrufer (ApiServer/Frontend)
+            // bei jedem Fehlversuch einen frischen Start an. Würde jeder Start den Zähler auf 0
+            // setzen, erreichten die aufeinanderfolgenden Fehlschläge nie StuckAfterFailures und
+            // der harte Reconnect (LiveView.Stuck -> UsbReconnectWatchdog) würde NIE ausgelöst -
+            // genau der beobachtete Endlos-"MTP device busy". Der Zähler wird stattdessen beim
+            // ersten erfolgreich empfangenen Frame bzw. nach erfolgreichem Recovery-Neustart
+            // im RunLoop auf 0 gesetzt - also nur bei echtem Fortschritt.
+
+            // Token in eine lokale Variable ziehen statt das Feld _cts erst innerhalb der Lambda
+            // zu lesen: ruft ein anderer Thread währenddessen StopAsync() auf (setzt _cts = null),
+            // kann die Lambda sonst mit einem bereits null gewordenen Feld starten -> NRE
+            // (beobachtet im Log: "RunLoop task faulted / NullReferenceException" mitten in einer
+            // Busy-Storm-Situation mit vielen gleichzeitigen Start/Stop-Aufrufen).
+            var cts = new CancellationTokenSource();
+            _cts = cts;
+            _task = Task.Run(() => RunLoop(cam, hub, cts.Token));
+
+            // Beobachtet die Task-Exception sofort und loggt sie, statt sie unbeobachtet zu lassen
+            // (sonst taucht sie u.U. erst Stunden später über den Finalizer-Thread als
+            // "Unobserved task exception" auf, siehe TaskScheduler.UnobservedTaskException in Program.cs).
+            _task.ContinueWith(t =>
+            {
+                var ex = t.Exception?.Flatten().InnerException ?? t.Exception;
+                _log.Error("LiveViewPump: RunLoop task faulted", ex);
+            }, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
         }
 
         public async Task StopAsync(TimeSpan? timeout = null)
@@ -102,11 +155,28 @@ namespace Photobox.CameraBridge.Core
 
             _log.Info($"LiveViewPump starting (fps={TargetFps})");
 
-            await _mta.InvokeAsync(() =>
+            try
             {
-                cam.PreventShutDown = true;
-                cam.StartLiveView();
-            }).ConfigureAwait(false);
+                await StartLiveViewWithShortRetryAsync(cam).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                // Auch der Erst-Start zählt zu den aufeinanderfolgenden Fehlversuchen und muss ab
+                // dem Schwellwert einen harten Reconnect anfordern. Sonst bleibt die Kamera bei
+                // dauerhaftem "MTP device busy" hängen, weil jeder Aufrufer nur einen frischen,
+                // sofort abbrechenden Pump erzeugt (der Recovery-Zweig weiter unten wird bei einem
+                // fehlgeschlagenen Erst-Start gar nicht erst erreicht).
+                var failures = NoteRestartFailure();
+                _log.Error($"LiveViewPump: initial StartLiveView failed (attempt {failures}), aborting start.{CodeSuffix(ex)}", ex);
+
+                if (failures >= StuckAfterFailures)
+                {
+                    _log.Error($"LiveViewPump: StartLiveView {failures}x in Folge nicht möglich - Kamera scheint dauerhaft blockiert (z.B. MTP device busy).{CodeSuffix(ex)} Fordere harten Reconnect an.", ex);
+                    RaiseStuck();
+                }
+
+                return;
+            }
 
             var lastFrameAt = sw.Elapsed;
             var lastKeepAliveAt = sw.Elapsed;
@@ -123,6 +193,8 @@ namespace Photobox.CameraBridge.Core
                     {
                         hub.Update(jpeg);
                         lastFrameAt = sw.Elapsed;
+                        if (_consecutiveRestartFailures != 0)
+                            Volatile.Write(ref _consecutiveRestartFailures, 0);
                     }
 
                     // KeepAlive (NotImplementedException wird abgefangen)
@@ -148,12 +220,45 @@ namespace Photobox.CameraBridge.Core
                     if (sw.Elapsed - lastFrameAt > TimeSpan.FromSeconds(2))
                     {
                         _log.Warn("No LiveView frames for >2s, restarting LiveView...");
+
+                        Exception restartError = null;
                         await _mta.InvokeAsync(() =>
                         {
-                            try { cam.StopLiveView(); } catch { }
-                            try { cam.StartLiveView(); } catch { }
+                            try { cam.StopLiveView(); }
+                            catch (Exception ex) { _log.Warn("LiveViewPump: StopLiveView during recovery failed: " + ex.Message); }
+
+                            try { cam.StartLiveView(); }
+                            catch (Exception ex) { restartError = ex; }
                         }).ConfigureAwait(false);
+
                         lastFrameAt = sw.Elapsed;
+
+                        if (restartError == null)
+                        {
+                            if (_consecutiveRestartFailures != 0)
+                                Volatile.Write(ref _consecutiveRestartFailures, 0);
+                        }
+                        else
+                        {
+                            var failures = NoteRestartFailure();
+                            _log.Warn($"LiveViewPump: StartLiveView during recovery failed (attempt {failures}): {restartError.Message}{CodeSuffix(restartError)}");
+
+                            if (failures >= StuckAfterFailures)
+                            {
+                                // Ein simples Stop/Start auf demselben SDK-Handle hilft hier erwiesenermaßen
+                                // nicht mehr weiter (z.B. dauerhaftes "MTP device busy") -> Konsumenten
+                                // benachrichtigen, damit ein harter Reconnect ausgelöst werden kann, und
+                                // per Backoff nicht weiter unnötig gegen die blockierte Kamera anrennen.
+                                _log.Error($"LiveViewPump: LiveView {failures}x in Folge nicht neu startbar - Kamera scheint blockiert (z.B. dauerhaft MTP busy).{CodeSuffix(restartError)} Fordere harten Reconnect an.", restartError);
+                                RaiseStuck();
+
+                                var backoff = TimeSpan.FromSeconds(Math.Min(30, 2 * failures));
+                                try { await Task.Delay(backoff, ct).ConfigureAwait(false); }
+                                catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
+
+                                lastFrameAt = sw.Elapsed;
+                            }
+                        }
                     }
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -192,6 +297,47 @@ namespace Photobox.CameraBridge.Core
             }).ConfigureAwait(false);
 
             _log.Info("LiveViewPump stopped.");
+        }
+
+        // Fängt eine kurzlebige Race direkt nach einem frischen Reconnect ab (siehe Kommentar bei
+        // InitialStartRetryAttempts oben), bevor sie den kumulativen Fehlerzähler erreicht.
+        private async Task StartLiveViewWithShortRetryAsync(ICameraDevice cam)
+        {
+            for (int attempt = 1; ; attempt++)
+            {
+                try
+                {
+                    await _mta.InvokeAsync(() =>
+                    {
+                        cam.PreventShutDown = true;
+                        cam.StartLiveView();
+                    }).ConfigureAwait(false);
+                    return;
+                }
+                catch when (attempt < InitialStartRetryAttempts)
+                {
+                    _log.Info($"LiveViewPump: initial StartLiveView attempt {attempt} failed transiently, retrying in {InitialStartRetryDelay.TotalMilliseconds}ms...");
+                    await Task.Delay(InitialStartRetryDelay).ConfigureAwait(false);
+                }
+            }
+        }
+
+        private int NoteRestartFailure()
+        {
+            return Interlocked.Increment(ref _consecutiveRestartFailures);
+        }
+
+        // Der rohe MTP-Statuscode (z.B. 0xA004 = MTP_Invalid_Status vs. 0x2019 = MTP_Device_Busy,
+        // siehe ErrorCodes.cs) wurde bisher nirgends geloggt - im File-Log stand nur der
+        // Anzeigetext ("Invalid status."), der zwei unterschiedliche Fehlerursachen gleich
+        // aussehen lässt. Für künftige Diagnose an den relevanten Stellen mit ausgeben.
+        private static string CodeSuffix(Exception ex) =>
+            ex is DeviceException de ? $" [MtpCode=0x{de.ErrorCode:X4}]" : "";
+
+        private void RaiseStuck()
+        {
+            try { Stuck?.Invoke(); }
+            catch (Exception ex) { _log.Warn("LiveViewPump: Stuck-Handler warf Exception: " + ex.Message); }
         }
 
         private static int ClampFps(int fps)

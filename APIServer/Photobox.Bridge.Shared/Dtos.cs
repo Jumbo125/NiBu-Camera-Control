@@ -134,6 +134,17 @@ public sealed class WorkerStatusDto
 
     [DataMember(Name = "watchdogEnabled", Order = 10, EmitDefaultValue = true)]
     public bool? WatchdogEnabled { get; set; }
+
+    // Kamera-Gesundheit getrennt von Prozess-Liveness (siehe LiveViewPump.Stuck in CameraHost).
+    // false bedeutet: Worker-Prozess ist erreichbar, aber die Kamera reagiert wiederholt nicht
+    // mehr (z.B. dauerhaft "MTP device busy"). Der ApiServer darf das NICHT als "Worker down"
+    // werten und deshalb keinen Prozess-Respawn auslösen - Recovery ist Sache des Workers
+    // (UsbReconnectWatchdog).
+    [DataMember(Name = "cameraResponsive", Order = 11, EmitDefaultValue = true)]
+    public bool CameraResponsive { get; set; } = true;
+
+    [DataMember(Name = "lastSdkOkUtc", Order = 12, EmitDefaultValue = true)]
+    public string? LastSdkOkUtc { get; set; }
 }
 
 [DataContract]

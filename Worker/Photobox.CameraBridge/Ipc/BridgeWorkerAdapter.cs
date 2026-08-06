@@ -36,6 +36,12 @@ namespace Photobox.CameraBridge.Ipc
         // Serialisiert kritische Operations
         private readonly SemaphoreSlim _gate = new SemaphoreSlim(1, 1);
 
+        // Doppel-Capture-Sperre: 0 = frei, 1 = ein Capture läuft. Wird VOR dem _gate gesetzt,
+        // damit ein zweiter Capture sofort abgelehnt wird und nicht hinter einem (evtl. SDK-seitig
+        // hängenden) ersten Capture eingereiht wird - sonst würde der zweite Auslöser feuern,
+        // sobald der erste fertig ist (= zwei Fotos).
+        private int _captureInFlight;
+
         private static bool IsAbsoluteWindowsPath(string p)
         {
             if (string.IsNullOrWhiteSpace(p)) return false;
@@ -165,12 +171,12 @@ namespace Photobox.CameraBridge.Ipc
 
         public Task<Shared.WorkerStatusDto> GetStatusAsync(CancellationToken ct)
         {
-            // IMPORTANT: don't read SDK/device objects from this thread.
-            // Use CameraHost snapshot methods (they marshal to the MTA thread).
-            var selectedId = _host.GetSelectedCameraId();
-            var camInfo = (selectedId.HasValue
-                ? _host.GetCameraList().FirstOrDefault(x => x.Id == selectedId.Value)
-                : null);
+            // IMPORTANT: this must NEVER block on the MTA thread. It backs the health-ping,
+            // which has to stay reachable even while the MTA thread hangs inside a wedged
+            // SDK call (e.g. Manager.ConnectToCamera() against a stuck camera). Only read the
+            // cached snapshot (CameraHost.GetStatusSnapshot()) - never GetSelectedCameraId()/
+            // GetCameraList(), which both marshal onto the MTA thread and block.
+            var snap = _host.GetStatusSnapshot();
 
             long total = _host.FrameHub.TotalFrames;
             long lastTick = _host.FrameHub.LastFrameTick;
@@ -192,15 +198,16 @@ namespace Photobox.CameraBridge.Ipc
             var dto = new Shared.WorkerStatusDto
             {
                 LiveViewRunning = _host.LiveView.IsRunning,
-                Selected = camInfo?.DisplayName,
-                Manufacturer = camInfo?.Manufacturer,
-                Model = camInfo?.Model,
-                Serial = camInfo?.Serial,
+                Selected = snap.DisplayName,
+                Manufacturer = snap.Manufacturer,
+                Model = snap.Model,
+                Serial = snap.Serial,
                 FramesTotal = total,
                 FrameAgeMs = ageMs,
                 LastFrameUtc = lastUtc,
-                Source = new Shared.StreamSourceDto { Serial = camInfo?.Serial, Id = selectedId },
-                WatchdogEnabled = _watchdog != null && _watchdog.Enabled
+                Source = new Shared.StreamSourceDto { Serial = snap.Serial, Id = snap.SelectedId },
+                WatchdogEnabled = _watchdog != null && _watchdog.Enabled,
+                CameraResponsive = _host.CameraResponsive
             };
 
             return Task.FromResult(dto);
@@ -352,8 +359,50 @@ namespace Photobox.CameraBridge.Ipc
             return Task.FromResult(dto);
         }
 
+        private static bool LooksLikeDeviceBusy(Exception ex)
+        {
+            var msg = ex?.Message ?? "";
+            return msg.IndexOf("busy", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        // Führt den Capture aus und versucht bei dauerhaftem "MTP device busy" GENAU EINMAL eine
+        // harte Recovery: SDK-Verbindung schließen, Geräte neu enumerieren, Kamera neu wählen
+        // (wie der Watchdog bei LiveView.Stuck), dann den Capture wiederholen. Ohne das bliebe die
+        // Kamera nach einem Busy-Capture hängen, weil die Recovery bisher nur an LiveView hing.
+        // Der harte Reconnect läuft NACH dem finally von CaptureWithTemporarySettingsAsync, d.h.
+        // _captureGate ist wieder frei und SelectCamera(0) kann es selbst nehmen.
+        private async Task<string> CaptureWithBusyRecoveryAsync(
+            string target, Shared.CaptureRequestDto req, bool apply, bool resetAfter, bool startLiveViewAfterCapture)
+        {
+            try
+            {
+                return await _host.CaptureWithTemporarySettingsAsync(
+                    target, req?.Iso, req?.Shutter, req?.WhiteBalance, req?.Aperture, req?.Exposure,
+                    apply, resetAfter, startLiveViewAfterCapture).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (LooksLikeDeviceBusy(ex))
+            {
+                var recovered = await _host.TryHardRecoverAsync().ConfigureAwait(false);
+                if (!recovered)
+                    throw; // Kamera nicht zurückgeholt -> ursprünglichen Busy-Fehler durchreichen
+
+                // genau EIN Neuversuch nach erfolgreichem Reconnect
+                return await _host.CaptureWithTemporarySettingsAsync(
+                    target, req?.Iso, req?.Shutter, req?.WhiteBalance, req?.Aperture, req?.Exposure,
+                    apply, resetAfter, startLiveViewAfterCapture).ConfigureAwait(false);
+            }
+        }
+
         public async Task<Shared.CaptureFileResultDto> CaptureToFileAsync(Shared.CaptureRequestDto req, CancellationToken ct)
         {
+            // Fast-Reject, solange bereits ein Capture läuft (auch ein hängender): NICHT hinter
+            // _gate einreihen, sonst würde ein per Timeout wiederholter Capture ein zweites Mal
+            // auslösen. Die Sperre wird VOR dem Gate genommen und im äußeren finally freigegeben.
+            if (Interlocked.CompareExchange(ref _captureInFlight, 1, 0) != 0)
+                throw new BridgeErrorException(Shared.ErrorCodes.DeviceBusy, "capture already in progress");
+
+            try
+            {
             await _gate.WaitAsync(ct).ConfigureAwait(false);
             try
             {
@@ -393,17 +442,8 @@ namespace Photobox.CameraBridge.Ipc
                 string file;
                 try
                 {
-                    file = await _host.CaptureWithTemporarySettingsAsync(
-                        target,
-                        req?.Iso,
-                        req?.Shutter,
-                        req?.WhiteBalance,
-                        req?.Aperture,
-                        req?.Exposure,
-                        apply,
-                        resetAfter,
-                        startLiveViewAfterCapture
-                    ).ConfigureAwait(false);
+                    file = await CaptureWithBusyRecoveryAsync(
+                        target, req, apply, resetAfter, startLiveViewAfterCapture).ConfigureAwait(false);
 
                     await WaitForFileStableAsync(file ?? target, ct).ConfigureAwait(false);
                     await Task.Delay(250, ct).ConfigureAwait(false);
@@ -416,6 +456,11 @@ namespace Photobox.CameraBridge.Ipc
                 return new Shared.CaptureFileResultDto { Ok = true, File = file };
             }
             finally { _gate.Release(); }
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _captureInFlight, 0);
+            }
         }
 
         public async Task<byte[]> CaptureJpegAsync(Shared.CaptureRequestDto req, CancellationToken ct)

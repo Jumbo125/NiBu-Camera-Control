@@ -22,7 +22,10 @@ namespace Photobox.Bridge.ApiServer;
 
 public sealed class WorkerHealthMonitor : BackgroundService
 {
-    private readonly BridgePipeClient _ipc;
+    // Eigener Pipe-Kanal (siehe HealthPipeClient), NICHT der Kommando-Singleton: sonst blockiert
+    // jeder Capture/Refresh/WaitNextFrame-Longpoll den Health-Ping schon beim Gate-Wait, auch
+    // bei völlig gesunder Kamera (FIX_PLAN.md Fix 2).
+    private readonly HealthPipeClient _ipc;
     private readonly WorkerHealthState _state;
     private readonly HealthSettings _health;
     private readonly WorkerSettings _worker;
@@ -58,7 +61,7 @@ public sealed class WorkerHealthMonitor : BackgroundService
     private int _restartsWithoutRecovery = 0;
 
     public WorkerHealthMonitor(
-        BridgePipeClient ipc,
+        HealthPipeClient ipc,
         WorkerHealthState state,
         IOptions<HealthSettings> health,
         IOptions<WorkerSettings> worker,
@@ -100,13 +103,14 @@ public sealed class WorkerHealthMonitor : BackgroundService
         {
             var ok = false;
             string? err = null;
+            WorkerStatusDto? workerStatus = null;
 
             try
             {
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
                 cts.CancelAfter(timeoutMs);
 
-                var workerStatus = await _ipc.CallAsync<WorkerStatusDto>(Commands.StatusGet, null, cts.Token);
+                workerStatus = await _ipc.CallAsync<WorkerStatusDto>(Commands.StatusGet, null, cts.Token);
                 _state.SetOk(workerStatus);
                 ok = true;
             }
@@ -136,9 +140,12 @@ public sealed class WorkerHealthMonitor : BackgroundService
                     TryWriteLine("[Health] Worker connection RESTORED");
                 }
 
-                // Heartbeat (alle IntervalMs)
+                // Heartbeat (alle IntervalMs). CameraResponsive=false bedeutet nur, dass die Kamera
+                // gerade nicht reagiert (z.B. dauerhaft busy) - der Worker-Prozess selbst ist
+                // erreichbar und läuft, das ist HIER bereits alles was zählt. Kein Respawn deswegen:
+                // Kamera-Recovery ist Sache des Workers (UsbReconnectWatchdog + Stuck-Signal).
                 var s = _state.Snapshot();
-                TryWriteLine($"[Health] Worker=OK failsInRow=0 lastOkUtc={s.LastOkUtc:O}");
+                TryWriteLine($"[Health] Worker=OK failsInRow=0 lastOkUtc={s.LastOkUtc:O} cameraResponsive={workerStatus?.CameraResponsive}");
                 _lastReachable = true;
             }
             else
@@ -193,7 +200,15 @@ public sealed class WorkerHealthMonitor : BackgroundService
                     _startupGraceUntilUtc = now.AddMilliseconds(StartupGraceMs);
 
                     _restartsWithoutRecovery++;
-                    if (_restartsWithoutRecovery >= EscalationRestartCount)
+
+                    // UsbCameraReset (Disable/Enable-DevNode) nur als LETZTE Eskalation, nie bei
+                    // jedem Neustart: der Reset zieht einem gerade laufenden Worker mitten im
+                    // Refresh/Startup die SDK-Session weg und verlängert damit den Sturm, statt
+                    // ihn zu beenden (FIX_PLAN.md Fix 5). Erst ab EscalationRestartCount
+                    // bestätigten Prozess-Toden in Folge versuchen, dann mit steigendem Backoff.
+                    var escalate = _restartsWithoutRecovery >= EscalationRestartCount;
+
+                    if (escalate)
                     {
                         try
                         {
@@ -211,16 +226,27 @@ public sealed class WorkerHealthMonitor : BackgroundService
                     {
                         try
                         {
-                            try
+                            if (escalate)
                             {
-                                var (found, resetOk) = UsbCameraReset.ResetCameraClassDevices(_log);
-                                _log.Information(
-                                    "Worker unreachable -> USB-Kamera-Reset vor Neustart versucht (found={Found}, ok={Ok}).",
-                                    found, resetOk);
-                            }
-                            catch (Exception ex)
-                            {
-                                try { _log.Warning(ex, "USB-Kamera-Reset fehlgeschlagen."); } catch { }
+                                // Deutlicher, wachsender Backoff vor dem Reset selbst: gibt einem
+                                // Worker, der zufällig gerade noch im Refresh/Startup steckt, eine
+                                // reelle Chance, von selbst fertig zu werden, bevor wir ihm hart die
+                                // SDK-Session wegziehen.
+                                var backoff = TimeSpan.FromSeconds(Math.Min(60, 10 * (_restartsWithoutRecovery - EscalationRestartCount + 1)));
+                                _log.Information("USB-Kamera-Reset Eskalation: warte {Backoff}s vor Reset.", backoff.TotalSeconds);
+                                try { await Task.Delay(backoff, CancellationToken.None); } catch { }
+
+                                try
+                                {
+                                    var (found, resetOk) = UsbCameraReset.ResetCameraClassDevices(_log);
+                                    _log.Information(
+                                        "Worker unreachable -> USB-Kamera-Reset (letzte Eskalation) versucht (found={Found}, ok={Ok}).",
+                                        found, resetOk);
+                                }
+                                catch (Exception ex)
+                                {
+                                    try { _log.Warning(ex, "USB-Kamera-Reset fehlgeschlagen."); } catch { }
+                                }
                             }
 
                             await _pm.EnsureStartedAsync("pipe_unreachable", CancellationToken.None);
