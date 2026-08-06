@@ -19,6 +19,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- für TargetedUsbReset.cs (CM_Disable_DevNode/CM_Enable_DevNode via WMI-Geräteklassenermittlung) -->
+    <Reference Include="System.Management" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Passe die Pfade ggf. an deine echte Ordnerstruktur an -->
     <ProjectReference Include="..\CameraControl.Devices\CameraControl.Devices.csproj" />
     <ProjectReference Include="..\Canon.Eos.Framework\Canon.Eos.Framework.csproj" />

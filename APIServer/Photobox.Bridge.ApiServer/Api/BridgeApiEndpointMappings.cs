@@ -97,6 +97,11 @@ internal static class BridgeApiEndpointMappings
                         dto.Source,
                         dto.WatchdogEnabled,
 
+                        // Kamera-Gesundheit getrennt von Prozess-Liveness sichtbar machen (Fix 4):
+                        // workerReachable=true + cameraResponsive=false bedeutet "Worker lebt,
+                        // Kamera hängt" - das Frontend soll das NICHT als Worker-Ausfall anzeigen.
+                        cameraResponsive = w?.CameraResponsive ?? true,
+
                         workerReachable = hs.Reachable,
                         workerLastOkUtc = hs.LastOkUtc?.ToString("o"),
                         workerLastError = hs.LastError,

@@ -27,6 +27,15 @@ namespace Photobox.CameraBridge.Core
         private volatile int _threadId;
         private volatile bool _running = true;
 
+        // Zeitpunkt (Ticks, UTC), zu dem die aktuell laufende Queue-Aktion gestartet wurde.
+        // 0 = gerade keine Aktion aktiv. Dient IsPossiblyStuck() als externer Hänger-Erkennung,
+        // weil eine einzelne blockierende SDK-Aktion (z.B. eine hängende Geräte-Enumeration)
+        // diesen Thread fuer immer belegen und damit ALLE folgenden Kamera-Operationen (auch
+        // spaetere Captures) auf unbestimmte Zeit blockieren kann - siehe RefreshAsync/
+        // TryHardRecoverAsync in CameraHost.cs, die kein echtes Cancellation der SDK-Aktion
+        // selbst kennen (Task.WhenAny dort gibt nur das Warten auf, stoppt die Aktion nicht).
+        private long _actionStartedAtTicks;
+
         private ApplicationContext _ctx;
         private System.Windows.Forms.Timer _timer;
         private readonly ManualResetEventSlim _started = new ManualResetEventSlim(false);
@@ -108,14 +117,30 @@ namespace Photobox.CameraBridge.Core
             while (processed < 200 && _queue.TryTake(out var action))
             {
                 processed++;
+                Interlocked.Exchange(ref _actionStartedAtTicks, DateTime.UtcNow.Ticks);
                 try { action?.Invoke(); }
                 catch (Exception ex) { _logger.Error("SDK action failed", ex); }
+                finally { Interlocked.Exchange(ref _actionStartedAtTicks, 0); }
             }
 
             if (!_running && _queue.Count == 0)
             {
                 try { _ctx?.ExitThread(); } catch { }
             }
+        }
+
+        /// <summary>
+        /// True, wenn seit mehr als <paramref name="threshold"/> ununterbrochen dieselbe
+        /// SDK-Aktion auf dem Worker-Thread laeuft (also der Thread hängt). Rein lesend,
+        /// unabhängig vom Worker-Thread selbst aufrufbar - z.B. aus einem externen Timer.
+        /// </summary>
+        public bool IsPossiblyStuck(TimeSpan threshold)
+        {
+            var startedTicks = Interlocked.Read(ref _actionStartedAtTicks);
+            if (startedTicks == 0) return false;
+
+            var elapsed = TimeSpan.FromTicks(DateTime.UtcNow.Ticks - startedTicks);
+            return elapsed > threshold;
         }
 
         public void Dispose()
