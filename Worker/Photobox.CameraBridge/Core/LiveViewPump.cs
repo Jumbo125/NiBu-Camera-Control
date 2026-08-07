@@ -267,8 +267,29 @@ namespace Photobox.CameraBridge.Core
                 }
                 catch (Exception ex)
                 {
-                    _log.Error("LiveViewPump loop error", ex);
-                    await Task.Delay(200, ct).ConfigureAwait(false);
+                    // Ohne Zähler/Backoff hämmerte dieser Zweig eine SDK-Verbindung, die z.B. durch
+                    // einen parallelen harten Reconnect gerade geschlossen wurde (COMException
+                    // 0x802A0002 "Shutdown bereits aufgerufen"), unbegrenzt im ~200ms-Takt weiter -
+                    // beobachtet als minutenlange Fehlerflut ohne jede Eskalation. Jetzt wie die
+                    // anderen Fehlerpfade oben behandeln: mitzählen und ab StuckAfterFailures Stuck
+                    // auslösen + Backoff, statt endlos gegen ein totes Handle zu retryen.
+                    var failures = NoteRestartFailure();
+                    _log.Error($"LiveViewPump loop error (attempt {failures}){CodeSuffix(ex)}", ex);
+
+                    if (failures >= StuckAfterFailures)
+                    {
+                        _log.Error($"LiveViewPump: {failures}x in Folge Loop-Fehler - Kamera/SDK-Verbindung scheint ungültig.{CodeSuffix(ex)} Fordere harten Reconnect an.", ex);
+                        RaiseStuck();
+
+                        var backoff = TimeSpan.FromSeconds(Math.Min(30, 2 * failures));
+                        try { await Task.Delay(backoff, ct).ConfigureAwait(false); }
+                        catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
+                    }
+                    else
+                    {
+                        try { await Task.Delay(200, ct).ConfigureAwait(false); }
+                        catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
+                    }
                 }
 
                 // Dynamischer FPS-Delay (mit work-time Kompensation)
