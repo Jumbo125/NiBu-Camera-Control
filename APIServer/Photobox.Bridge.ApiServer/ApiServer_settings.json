@@ -1,0 +1,25 @@
+{
+  "Bridge": {
+    "BindAddress": "127.0.0.1",
+    "Port": 8052,
+    "PipeName": "Photobox.CameraBridge.CommandPipe",
+    "AuthKey": "",
+    "MjpegPath": "/live.mjpg",
+    "AllowedOrigins": [ "http://127.0.0.1:8050", "http://localhost:8050" ]
+  },
+  "Health": {
+    "IntervalMs": 2000,
+    "TimeoutMs": 800
+  },
+  "Logging": {
+    "LogFile": "ApiServer_log.txt"
+  },
+  "Worker": {
+  "ExePath": "C:\\Photobox\\CameraWorker.exe",
+  "Args": "",
+  "AutoStartOnBoot": true,
+  "AutoStartWhenUnreachable": true,
+  "StartCooldownMs": 8000,
+  "FailThreshold": 3
+}
+}

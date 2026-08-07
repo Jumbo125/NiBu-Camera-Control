@@ -33,6 +33,13 @@ public interface IBridgeWorker
     Task<WatchdogDto> SetWatchdogAsync(bool enabled, CancellationToken ct);
 
     /// <summary>
+    /// Manueller Reset aus LOCKED_FAULT zurück nach SINGLE_RECOVERY (siehe
+    /// CAMERA_RECOVERY_CIRCUIT_BREAKER.md). Kein Effekt, falls der Circuit Breaker aktuell
+    /// nicht im Fehlerzustand ist.
+    /// </summary>
+    Task<OkDto> ResetCameraRecoveryAsync(CancellationToken ct);
+
+    /// <summary>
     /// Wait until a frame newer than lastSeq is available or timeout triggers.
     /// Return seq + optional jpeg (base64 is added by IPC layer).
     /// </summary>

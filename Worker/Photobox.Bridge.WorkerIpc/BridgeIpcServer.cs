@@ -258,6 +258,12 @@ public sealed class BridgeIpcServer : IDisposable
                     return Ok(id, payload);
                 }
 
+                case Commands.CameraRecoveryReset:
+                {
+                    var ok = await _worker.ResetCameraRecoveryAsync(ct).ConfigureAwait(false);
+                    return Ok(id, ok);
+                }
+
                 case Commands.Shutdown:
                 {
                     // Fire shutdown after response is written so the client can read it.

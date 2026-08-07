@@ -270,6 +270,12 @@ namespace Photobox.CameraBridge
                 ipc = new BridgeIpcServer(ipcWorker, pipeName: pipeName, log: s => logger.Info(s), onShutdown: IpcShutdown);
                 ipc.Start();
 
+                // ONE_WORKER_RESTART (Circuit Breaker, siehe CAMERA_RECOVERY_CIRCUIT_BREAKER.md):
+                // derselbe geordnete Shutdown-Pfad wie beim IPC-Kommando "worker.shutdown". Der
+                // ApiServer erkennt die danach verschwundene Pipe und startet den Worker über die
+                // bereits vorhandene WorkerHealthMonitor/WorkerProcessManager-Logik neu.
+                watchdog.RequestWorkerRestart = IpcShutdown;
+
                 AppDomain.CurrentDomain.ProcessExit += (_, __) => ShutdownOnce();
 
                 
