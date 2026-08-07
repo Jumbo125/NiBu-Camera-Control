@@ -134,6 +134,19 @@ public sealed class WorkerStatusDto
 
     [DataMember(Name = "lastSdkOkUtc", Order = 12, EmitDefaultValue = true)]
     public string? LastSdkOkUtc { get; set; }
+
+    // Circuit-Breaker-Zustand des UsbReconnectWatchdog (siehe CAMERA_RECOVERY_CIRCUIT_BREAKER.md).
+    // "normal" | "cooldown" | "locked_fault". Getrennt von CameraResponsive, damit API/UI zwischen
+    // "kurzzeitig busy, Watchdog arbeitet noch" und "Circuit Breaker offen, keine automatischen
+    // Resets mehr" unterscheiden können.
+    [DataMember(Name = "recoveryState", Order = 13, EmitDefaultValue = true)]
+    public string? RecoveryState { get; set; }
+
+    [DataMember(Name = "recoveryReason", Order = 14, EmitDefaultValue = true)]
+    public string? RecoveryReason { get; set; }
+
+    [DataMember(Name = "recoveryCooldownUntilUtc", Order = 15, EmitDefaultValue = true)]
+    public string? RecoveryCooldownUntilUtc { get; set; }
 }
 
 [DataContract]

@@ -143,6 +143,17 @@ namespace Photobox.CameraBridge.Ipc
                 return false;
             }
         }
+        private static string RecoveryStateToWireString(CameraRecoveryState? state)
+        {
+            switch (state)
+            {
+                case CameraRecoveryState.Normal: return "normal";
+                case CameraRecoveryState.Cooldown: return "cooldown";
+                case CameraRecoveryState.LockedFault: return "locked_fault";
+                default: return null;
+            }
+        }
+
         private string ComputeLastFrameUtc()
         {
             try
@@ -207,10 +218,19 @@ namespace Photobox.CameraBridge.Ipc
                 LastFrameUtc = lastUtc,
                 Source = new Shared.StreamSourceDto { Serial = snap.Serial, Id = snap.SelectedId },
                 WatchdogEnabled = _watchdog != null && _watchdog.Enabled,
-                CameraResponsive = _host.CameraResponsive
+                CameraResponsive = _host.CameraResponsive,
+                RecoveryState = RecoveryStateToWireString(_watchdog?.RecoveryState),
+                RecoveryReason = _watchdog?.RecoveryReason,
+                RecoveryCooldownUntilUtc = _watchdog?.RecoveryCooldownUntilUtc?.ToString("O")
             };
 
             return Task.FromResult(dto);
+        }
+
+        public Task<Shared.OkDto> ResetCameraRecoveryAsync(CancellationToken ct)
+        {
+            _watchdog?.ManualReset();
+            return Task.FromResult(new Shared.OkDto { Ok = true });
         }
 
         public async Task<bool> SetSettingsAsync(CameraSettingsDtoPartial patch, CancellationToken ct)
@@ -309,8 +329,29 @@ namespace Photobox.CameraBridge.Ipc
             await refreshTask.ConfigureAwait(false);
         }
 
+        // Verhindert, dass ein externer Aufrufer (HTTP-Poll, Frontend-Heartbeat, ...) LiveView
+        // während COOLDOWN/LOCKED_FAULT erneut anstößt und damit den Circuit Breaker umgeht -
+        // siehe CAMERA_RECOVERY_CIRCUIT_BREAKER.md: "Der Versuch darf nicht durch einen HTTP-Poll,
+        // LiveView-Longpoll oder parallelen Capture erneut ausgelöst werden."
+        private void ThrowIfRecoveryBlocksCameraOps()
+        {
+            var state = _watchdog?.RecoveryState;
+            if (state != CameraRecoveryState.Cooldown && state != CameraRecoveryState.LockedFault)
+                return;
+
+            var until = _watchdog.RecoveryCooldownUntilUtc;
+            var suffix = until.HasValue ? " (cooldown bis " + until.Value.ToString("O") + ")" : "";
+
+            throw new BridgeErrorException(
+                Shared.ErrorCodes.DeviceBusy,
+                "camera recovery circuit breaker ist " + RecoveryStateToWireString(state) + suffix +
+                " - LiveView/Recovery bleibt bewusst aus, bis der Circuit Breaker wieder NORMAL ist.");
+        }
+
         public async Task StartLiveViewAsync(CancellationToken ct)
         {
+            ThrowIfRecoveryBlocksCameraOps();
+
             await _gate.WaitAsync(ct).ConfigureAwait(false);
             try { _host.StartLiveView(); }
             finally { _gate.Release(); }
@@ -382,6 +423,11 @@ namespace Photobox.CameraBridge.Ipc
             }
             catch (Exception ex) when (LooksLikeDeviceBusy(ex))
             {
+                // Keine zweite, vom Circuit Breaker unabhängige PnP-Reset-Eskalation, solange der
+                // Watchdog bereits in COOLDOWN/LOCKED_FAULT ist - sonst würde dieser Pfad die
+                // Episoden-/Reset-Begrenzung aus CAMERA_RECOVERY_CIRCUIT_BREAKER.md umgehen.
+                ThrowIfRecoveryBlocksCameraOps();
+
                 var recovered = await _host.TryHardRecoverAsync().ConfigureAwait(false);
                 if (!recovered)
                     throw; // Kamera nicht zurückgeholt -> ursprünglichen Busy-Fehler durchreichen

@@ -74,6 +74,9 @@ internal static class BridgeApiEndpointMappings
                     LastFrameUtc = w?.LastFrameUtc,
                     Source = w?.Source,
                     WatchdogEnabled = w?.WatchdogEnabled,
+                    RecoveryState = w?.RecoveryState,
+                    RecoveryReason = w?.RecoveryReason,
+                    RecoveryCooldownUntilUtc = w?.RecoveryCooldownUntilUtc,
                 };
 
                 return Results.Json(
@@ -96,6 +99,14 @@ internal static class BridgeApiEndpointMappings
                         dto.LastFrameUtc,
                         dto.Source,
                         dto.WatchdogEnabled,
+
+                        // Circuit-Breaker-Zustand (siehe CAMERA_RECOVERY_CIRCUIT_BREAKER.md):
+                        // "normal" | "cooldown" | "locked_fault". Getrennt von cameraResponsive,
+                        // damit das Frontend zwischen "kurzzeitig busy" und "Circuit Breaker offen,
+                        // keine automatischen Resets mehr" unterscheiden kann.
+                        dto.RecoveryState,
+                        dto.RecoveryReason,
+                        dto.RecoveryCooldownUntilUtc,
 
                         // Kamera-Gesundheit getrennt von Prozess-Liveness sichtbar machen (Fix 4):
                         // workerReachable=true + cameraResponsive=false bedeutet "Worker lebt,
@@ -399,6 +410,24 @@ internal static class BridgeApiEndpointMappings
         )
             .WithTags("Watchdog")
             .Produces<WatchdogDto>(StatusCodes.Status200OK, "application/json");
+
+        app.MapPost(
+            "/api/camera/recovery/reset",
+            async (BridgePipeClient ipc) =>
+            {
+                // Manueller Reset aus LOCKED_FAULT (siehe CAMERA_RECOVERY_CIRCUIT_BREAKER.md):
+                // ein reiner Pass-through zum Worker, der den Circuit Breaker intern zurücksetzt.
+                // Kein Worker-Respawn hier - das bleibt ausschließlich Sache des Workers.
+                var ok = await ipc.CallAsync<OkDto>(
+                    Commands.CameraRecoveryReset,
+                    null,
+                    CancellationToken.None
+                );
+                return Results.Json(ok ?? new OkDto { Ok = false }, Program.JsonOpts);
+            }
+        )
+            .WithTags("Camera")
+            .Produces<OkDto>(StatusCodes.Status200OK, "application/json");
     }
 
     internal static bool IsPublic(HttpContext ctx, string mjpegPath)

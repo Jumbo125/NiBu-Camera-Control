@@ -1,0 +1,7 @@
+{
+  "overrides": {
+    "Z 6": "CameraControl.Devices.Nikon.NikonZ6",
+    "Z 8": "CameraControl.Devices.Nikon.NikonZ7"
+  },
+  "nikonDefaultDriver": "CameraControl.Devices.Nikon.NikonD600Base"
+}
