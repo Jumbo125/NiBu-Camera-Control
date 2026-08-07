@@ -32,4 +32,7 @@ public static class Commands
     public const string WatchdogSet = "watchdog.set";
 
     public const string FrameWaitNext = "frame.wait_next";
+
+    /// <summary>Manueller Reset aus LOCKED_FAULT zurück nach SINGLE_RECOVERY (siehe CAMERA_RECOVERY_CIRCUIT_BREAKER.md).</summary>
+    public const string CameraRecoveryReset = "camera.recovery.reset";
 }

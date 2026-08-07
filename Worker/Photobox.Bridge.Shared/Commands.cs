@@ -23,4 +23,7 @@ public static class Commands
     public const string FrameWaitNext = "frame.wait_next";
 
     public const string Shutdown = "worker.shutdown";
+
+    /// <summary>Manueller Reset aus LOCKED_FAULT zurück nach SINGLE_RECOVERY (siehe CAMERA_RECOVERY_CIRCUIT_BREAKER.md).</summary>
+    public const string CameraRecoveryReset = "camera.recovery.reset";
 }

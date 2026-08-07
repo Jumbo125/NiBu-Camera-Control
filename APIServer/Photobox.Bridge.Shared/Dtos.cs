@@ -72,6 +72,15 @@ public sealed class StatusDto
     // Optional extension
     [DataMember(Name = "watchdogEnabled", Order = 17, EmitDefaultValue = true)]
     public bool? WatchdogEnabled { get; set; }
+
+    [DataMember(Name = "recoveryState", Order = 18, EmitDefaultValue = true)]
+    public string? RecoveryState { get; set; }
+
+    [DataMember(Name = "recoveryReason", Order = 19, EmitDefaultValue = true)]
+    public string? RecoveryReason { get; set; }
+
+    [DataMember(Name = "recoveryCooldownUntilUtc", Order = 20, EmitDefaultValue = true)]
+    public string? RecoveryCooldownUntilUtc { get; set; }
 }
 
 [DataContract]
@@ -145,6 +154,17 @@ public sealed class WorkerStatusDto
 
     [DataMember(Name = "lastSdkOkUtc", Order = 12, EmitDefaultValue = true)]
     public string? LastSdkOkUtc { get; set; }
+
+    // Circuit-Breaker-Zustand des UsbReconnectWatchdog (siehe CAMERA_RECOVERY_CIRCUIT_BREAKER.md).
+    // "normal" | "cooldown" | "locked_fault".
+    [DataMember(Name = "recoveryState", Order = 13, EmitDefaultValue = true)]
+    public string? RecoveryState { get; set; }
+
+    [DataMember(Name = "recoveryReason", Order = 14, EmitDefaultValue = true)]
+    public string? RecoveryReason { get; set; }
+
+    [DataMember(Name = "recoveryCooldownUntilUtc", Order = 15, EmitDefaultValue = true)]
+    public string? RecoveryCooldownUntilUtc { get; set; }
 }
 
 [DataContract]
