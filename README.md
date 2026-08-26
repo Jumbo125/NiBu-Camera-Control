@@ -8,6 +8,7 @@
 ![IPC](https://img.shields.io/badge/IPC-Named%20Pipe-6f42c1)
 ![Docs](https://img.shields.io/badge/Docs-Swagger%20%2F%20OpenAPI-85ea2d)
 ![Browser](https://img.shields.io/badge/Browser-WebView2-1f6feb)
+![Firmware](https://img.shields.io/badge/Firmware-MicroPython%20(Pico)-yellow)
 
 [Deutsch](#deutsch) | [English](#english)
 
@@ -31,16 +32,18 @@ Dieses Repository bündelt die zentralen Komponenten der **Photobox CameraBridge
 - **ApiServer.exe** als HTTP-/JSON-API mit Swagger / OpenAPI und MJPEG-LiveView
 - **worker.exe** als eigentliche Kameraschnittstelle
 - **NiBu-Photobox-Browser** als lokaler WebView2-Host für die Photobox-Oberfläche und die direkte Browser-Steuerung aus HTML / JavaScript
+- **Extern_PC (Pi-Pico)** als hardwarenahes Sensor-/Münzinterface (Präsenzerkennung via ToF, Münzprüfer) über USB-Serial
 - **Shared / WorkerIpc** für gemeinsame DTOs, Commands und Named-Pipe-IPC
 
-Der **Launcher** ist die Bedien- und Installationsschicht.  
-Der **API-Server** ist die HTTP-Schicht.  
-Der **Worker** steuert die Kamera.  
+Der **Launcher** ist die Bedien- und Installationsschicht.
+Der **API-Server** ist die HTTP-Schicht.
+Der **Worker** steuert die Kamera.
 Der **NiBu-Photobox-Browser** stellt die lokale Browser-/Kiosk-Schicht bereit.
+Der **Extern_PC (Pi-Pico)** liefert Präsenz-/Münz-Rohdaten per USB-Serial zu.
 
 ## Support
 
-Donate with PayPal ☕  
+Donate with PayPal ☕
 Wenn dir das Projekt hilft und du mir einen Kaffee ausgeben willst:
 
 [![Donate with PayPal ☕](https://img.shields.io/badge/Donate-PayPal-00457C?logo=paypal&logoColor=white)](https://www.paypal.me/andreasrottmann92)
@@ -53,6 +56,7 @@ Wenn dir das Projekt hilft und du mir einen Kaffee ausgeben willst:
 | `ApiServer.exe` | Stellt die HTTP/JSON-API bereit, streamt MJPEG-LiveView und zeigt die API-Dokumentation via Swagger / OpenAPI |
 | `worker.exe` | Kapselt die Kamerasteuerung, LiveView, Capture, Settings und Watchdog |
 | `NiBu-Photobox-Browser` | Lokaler WebView2-Host für lokale oder HTTP-basierte Oberflächen, Kioskmodus und direkte Steuerung per JavaScript-Bridge |
+| `Extern_PC (Pi-Pico)` | MicroPython-Firmware auf einem Raspberry Pi Pico: liest ToF-Distanz (VL53L1X) und Münzereignisse (ST-001) und meldet sie zeilenbasiert per USB-Serial an `pi_pico_core.py` |
 | `Shared` / `WorkerIpc` | Definieren Commands, DTOs, Pipe-Protokoll und die IPC-Schicht |
 
 ## Screenshots
@@ -85,6 +89,14 @@ Web UI / HTML / JavaScript
 NiBu-Photobox-Browser
         ↕
    WebView2 / Kiosk / lokaler Host
+
+Extern_PC (Raspberry Pi Pico)
+        │ USB-Serial (DISTANCE:/COIN:/STATUS:/ID?)
+        ▼
+  pi_pico_core.py
+        │
+        ├─ Distanz < Schwellwert → LiveView-Trigger (CameraBridge API)
+        └─ Münze erkannt → credit_core.add_credit()
 ```
 
 ## Repository-Struktur
@@ -96,6 +108,10 @@ NiBu-Photobox-Browser
   /Photobox.Bridge.WorkerIpc
   /Photobox.Bridge.Worker
   /Photobox.Bridge.ApiServer
+/Extern_PC
+  main.py
+  /lib
+    vl53l1x.py
 /browser
 /images
 /icons
@@ -118,7 +134,7 @@ Typische Aufgaben:
 - Firewall-, Task-, Watchdog- und Port-Verwaltung
 - Hilfen für Kiosk-Anpassungen und manuellen Autostart
 
-Wichtig: Der Windows-Autostart wird bewusst **nicht automatisch** gesetzt.  
+Wichtig: Der Windows-Autostart wird bewusst **nicht automatisch** gesetzt.
 Die Einrichtung erfolgt manuell über die vom Launcher erzeugte Verknüpfung.
 
 ### API Server
@@ -198,6 +214,47 @@ Hinweise:
 - Eine lokale `.php`-Datei wird nicht als PHP ausgeführt. Dafür ist eine Server-URL wie `http://127.0.0.1:8080/index.php` nötig.
 - Das Beenden per Fenster-X oder per JavaScript ist ohne Passwort möglich.
 
+### Extern_PC (Pi-Pico) – Sensor-/Münzinterface
+
+`Extern_PC` enthält die MicroPython-Firmware für einen Raspberry Pi Pico, der ausschließlich die hardwarenahe Erfassung übernimmt:
+
+- **Präsenz** über einen VL53L1X ToF-Sensor (kontinuierliche, median-gefilterte Distanzmessung)
+- **Münzereignisse** über einen Sintron ST-001 Münzprüfer
+
+Der Pico ist per USB mit dem PC verbunden und meldet einfache, zeilenbasierte Events über USB-Serial an `pi_pico_core.py`. Er führt bewusst **kein Guthaben** und trifft **keine Presence-Entscheidung** — beides bleibt Aufgabe des PC-Servers.
+
+Wichtige Events:
+
+| Event | Bedeutung |
+|---|---|
+| `READY` | Boot-Meldung des Pico |
+| `ID?` → `ID:TOF_Muenzzaehler` | Identify-Handshake zur Port-Erkennung |
+| `DISTANCE:<mm>` | Median-gefilterte ToF-Distanz, gedrosselt ca. alle 250 ms |
+| `PRESENCE` | Optionaler Altprotokoll-Fallback (Presence-Debounce/-Hysterese in der Firmware) |
+| `COIN:<cent>` | Erkannte Münze (z. B. `COIN:100` = 1,00 EUR) |
+| `STATUS:TOF=OK` / `STATUS:TOF=ERR` | ToF-Erreichbarkeit bei Zustandswechsel |
+
+Dateien:
+
+```text
+/Extern_PC
+  main.py            # Hauptprogramm auf dem Pico
+  /lib
+    vl53l1x.py        # MicroPython-Treiber für den VL53L1X
+```
+
+Wiring (Kurzfassung):
+
+```text
+VL53L1X    → Pico       ST-001     → Pico
+VIN/VCC    → 3V3 OUT     TX        → GP5 (UART1 RX)
+GND        → GND         GND       → GND
+SDA        → GP0
+SCL        → GP1
+```
+
+Details zu Protokoll, Wiring, Fehlerverhalten und Architekturregeln (z. B. „Pico speichert nie Guthaben") stehen in [`Extern_PC/CLAUDE.md`](Extern_PC/CLAUDE.md).
+
 ## Gemeinsames Protokoll
 
 Die Kommunikation zwischen API-Server und Worker läuft über **Named Pipe IPC** mit gemeinsamen Commands und DTOs.
@@ -219,9 +276,11 @@ Wichtige Command-Gruppen:
 - `watchdog.set`
 - `frame.wait_next`
 
-Wichtig:  
-Auf Worker-/IPC-Ebene gibt es weiterhin nur den Capture-Command `capture`.  
+Wichtig:
+Auf Worker-/IPC-Ebene gibt es weiterhin nur den Capture-Command `capture`.
 Die Komfortfunktion **Capture + danach LiveView** wird auf Ebene des API-Servers umgesetzt.
+
+Die Kommunikation zwischen Pico und PC läuft dagegen über ein einfaches, zeilenbasiertes **USB-Serial-Protokoll** (siehe Tabelle oben unter „Extern_PC (Pi-Pico)").
 
 ## Quick Start
 
@@ -255,6 +314,15 @@ Die Komfortfunktion **Capture + danach LiveView** wird auf Ebene des API-Servers
 3. optional `kiosk`, `title`, `icon`, `minimizeToTray` und `allowDevTools` festlegen
 4. **NiBu-Photobox-Browser** starten
 5. Oberfläche laden und bei Bedarf aus JavaScript über `window.hostApp` steuern
+
+### Variante D – Extern_PC (Pi-Pico) flashen
+
+1. Pico per USB verbinden, MicroPython-Firmware muss installiert sein
+2. `Extern_PC/main.py` auf den Pico kopieren
+3. `Extern_PC/lib/vl53l1x.py` nach `/lib/vl53l1x.py` auf dem Pico kopieren
+4. Pico neu starten
+5. USB-Serial prüfen: erste Zeile muss `READY` sein
+6. `pi_pico_core.py` auf dem PC erkennt den Port automatisch über den `ID?`-Handshake
 
 ## Typische Standardports
 
@@ -329,12 +397,14 @@ This repository combines the core components of **Photobox CameraBridge** in one
 - **ApiServer.exe** as the HTTP/JSON API with Swagger / OpenAPI and MJPEG LiveView
 - **worker.exe** as the actual camera bridge
 - **NiBu-Photobox-Browser** as a local WebView2 host for the Photobox frontend and improved browser control directly from HTML / JavaScript
+- **Extern_PC (Pi-Pico)** as a hardware-level sensor/coin interface (ToF presence detection, coin acceptor) over USB serial
 - **Shared / WorkerIpc** for common DTOs, commands and Named Pipe IPC
 
-The **launcher** is the operations and setup layer.  
-The **API server** is the HTTP layer.  
-The **worker** controls the camera.  
+The **launcher** is the operations and setup layer.
+The **API server** is the HTTP layer.
+The **worker** controls the camera.
 The **NiBu-Photobox-Browser** provides the local browser / kiosk layer.
+The **Extern_PC (Pi-Pico)** feeds raw presence/coin data in over USB serial.
 
 ## Support
 
@@ -350,6 +420,7 @@ Donate with PayPal ☕
 | `ApiServer.exe` | Provides the HTTP/JSON API, streams MJPEG LiveView and exposes API docs through Swagger / OpenAPI |
 | `worker.exe` | Handles camera control, LiveView, capture, settings and watchdog |
 | `NiBu-Photobox-Browser` | Local WebView2 host for local or HTTP-based frontend targets, kiosk mode and direct JavaScript bridge control |
+| `Extern_PC (Pi-Pico)` | MicroPython firmware on a Raspberry Pi Pico: reads ToF distance (VL53L1X) and coin events (ST-001) and reports them line-by-line over USB serial to `pi_pico_core.py` |
 | `Shared` / `WorkerIpc` | Define commands, DTOs, pipe protocol and the IPC layer |
 
 ## Screenshots
@@ -382,6 +453,14 @@ Web UI / HTML / JavaScript
 NiBu-Photobox-Browser
         ↕
    WebView2 / kiosk / local host
+
+Extern_PC (Raspberry Pi Pico)
+        │ USB serial (DISTANCE:/COIN:/STATUS:/ID?)
+        ▼
+  pi_pico_core.py
+        │
+        ├─ distance below threshold → LiveView trigger (CameraBridge API)
+        └─ coin detected → credit_core.add_credit()
 ```
 
 ## Repository structure
@@ -393,6 +472,10 @@ NiBu-Photobox-Browser
   /Photobox.Bridge.WorkerIpc
   /Photobox.Bridge.Worker
   /Photobox.Bridge.ApiServer
+/Extern_PC
+  main.py
+  /lib
+    vl53l1x.py
 /browser
 /images
 /icons
@@ -415,7 +498,7 @@ Typical tasks:
 - firewall, task, watchdog and port management
 - helpers for kiosk tweaks and manual autostart
 
-Important: Windows autostart is intentionally **not set automatically**.  
+Important: Windows autostart is intentionally **not set automatically**.
 Setup is done manually through the shortcut created by the launcher.
 
 ### API Server
@@ -495,6 +578,47 @@ Notes:
 - A local `.php` file is not executed as PHP. For PHP, use a server URL such as `http://127.0.0.1:8080/index.php`.
 - Closing via window X or via JavaScript works without a password.
 
+### Extern_PC (Pi-Pico) – sensor/coin interface
+
+`Extern_PC` contains the MicroPython firmware for a Raspberry Pi Pico that handles hardware-level acquisition only:
+
+- **Presence** via a VL53L1X ToF sensor (continuous, median-filtered distance measurement)
+- **Coin events** via a Sintron ST-001 coin acceptor
+
+The Pico is connected to the PC via USB and reports simple, line-based events over USB serial to `pi_pico_core.py`. It deliberately holds **no credit balance** and makes **no presence decision** — both stay the responsibility of the PC server.
+
+Key events:
+
+| Event | Meaning |
+|---|---|
+| `READY` | Pico boot message |
+| `ID?` → `ID:TOF_Muenzzaehler` | Identify handshake for port discovery |
+| `DISTANCE:<mm>` | Median-filtered ToF distance, throttled to roughly every 250 ms |
+| `PRESENCE` | Optional legacy fallback (presence debounce/hysteresis in firmware) |
+| `COIN:<cent>` | Detected coin (e.g. `COIN:100` = 1.00 EUR) |
+| `STATUS:TOF=OK` / `STATUS:TOF=ERR` | ToF reachability on state change |
+
+Files:
+
+```text
+/Extern_PC
+  main.py            # main program running on the Pico
+  /lib
+    vl53l1x.py         # MicroPython driver for the VL53L1X
+```
+
+Wiring (short form):
+
+```text
+VL53L1X    → Pico       ST-001     → Pico
+VIN/VCC    → 3V3 OUT     TX        → GP5 (UART1 RX)
+GND        → GND         GND       → GND
+SDA        → GP0
+SCL        → GP1
+```
+
+Details on protocol, wiring, error handling and architecture rules (e.g. "the Pico never stores a credit balance") live in [`Extern_PC/CLAUDE.md`](Extern_PC/CLAUDE.md).
+
 ## Shared protocol
 
 Communication between API server and worker uses **Named Pipe IPC** with shared commands and DTOs.
@@ -516,9 +640,11 @@ Main command groups:
 - `watchdog.set`
 - `frame.wait_next`
 
-Important:  
-At worker / IPC level there is still only one capture command: `capture`.  
+Important:
+At worker / IPC level there is still only one capture command: `capture`.
 The convenience flow **capture + then restart LiveView** is implemented at API-server level.
+
+Communication between the Pico and the PC instead uses a simple, line-based **USB serial protocol** (see the table above under "Extern_PC (Pi-Pico)").
 
 ## Quick start
 
@@ -552,6 +678,15 @@ The convenience flow **capture + then restart LiveView** is implemented at API-s
 3. optionally configure `kiosk`, `title`, `icon`, `minimizeToTray` and `allowDevTools`
 4. start **NiBu-Photobox-Browser**
 5. load the UI and control the host from JavaScript through `window.hostApp` if needed
+
+### Option D – flashing Extern_PC (Pi-Pico)
+
+1. connect the Pico via USB, MicroPython firmware must be installed
+2. copy `Extern_PC/main.py` onto the Pico
+3. copy `Extern_PC/lib/vl53l1x.py` to `/lib/vl53l1x.py` on the Pico
+4. restart the Pico
+5. check USB serial: the first line must be `READY`
+6. `pi_pico_core.py` on the PC discovers the port automatically via the `ID?` handshake
 
 ## Typical default ports
 
@@ -596,7 +731,7 @@ Special thanks to:
 - **digiCamControl** – for inspiration and as a basis for selected ideas, data or adapted workflows
 - **Swagger / OpenAPI** – for the clear API overview and the interactive documentation layer of the API server
 
-Note: Some data and parts of the behavior were adapted, modified and integrated into this project’s own workflow.
+Note: Some data and parts of the behavior were adapted, modified and integrated into this project's own workflow.
 
 ## License
 
