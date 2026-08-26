@@ -1,0 +1,50 @@
+Raspberry Pi Pico – Wiring
+==========================
+
+VL53L1X -> Raspberry Pi Pico
+----------------------------
+VL53L1X VCC/VIN  -> Pico 3V3(OUT), physischer Pin 36
+VL53L1X GND      -> Pico GND,      z.B. physischer Pin 38
+VL53L1X SDA      -> Pico GP0,      physischer Pin 1 -> GELB
+VL53L1X SCL      -> Pico GP1,      physischer Pin 2 -> Orange
+VL53L1X XSHUT    -> nicht benötigt
+VL53L1X GPIO/INT -> nicht benötigt
+
+ST-001 -> Raspberry Pi Pico
+---------------------------
+Pico UART1 RX = GP5, physischer Pin 7 -> weiß   
+Pico UART1 TX = GP4, physischer Pin 6 -> grau  
+
+ST-001 TX        -> Pico GP5 (UART1 RX), physischer Pin 7   ST001 ORANGE
+RX                                                          ST001 GELB
+ST-001 GND       -> Pico GND,               z.B. physischer Pin 8
+ST-001 Versorgung-> gemäß ST-001/Versorgungsaufbau separat
+
+Pico GP4 (UART1 TX), physischer Pin 6:
+NICHT anschließen. Der Pico liest den ST-001 nur passiv (RX), sendet
+nie etwas zurück. In main.py wird UART1 zwar mit tx=Pin(4), rx=Pin(5)
+initialisiert (MicroPython braucht für den UART-Treiber beide Pin-
+Angaben), physisch bleibt GP4 aber unbeschaltet.
+
+WICHTIG:
+- Pico-GND und ST-001-GND müssen gemeinsam verbunden sein.
+- Niemals mehr als 3,3 V auf einen Pico-GPIO geben.
+- ST-001 TX nur direkt an GP5 anschließen, wenn dessen Signalpegel
+  tatsächlich 3,3-V-tauglich ist. Sonst Pegelwandler/Spannungsteiler verwenden.
+
+USB
+---
+Pico USB -> Windows-/Linux-PC
+MicroPython print() erscheint am USB-Serial-Port.
+Der PC erwartet:
+  READY
+  PRESENCE
+  COIN:10
+  COIN:20
+  COIN:50
+  COIN:100
+  COIN:200
+  STATUS:TOF=OK
+  STATUS:TOF=ERR
+
+Der Pico summiert Münzen NICHT.
