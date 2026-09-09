@@ -1,0 +1,8 @@
+is_global = true
+build_property.RootNamespace = Photobox.Bridge.Shared
+build_property.ProjectDir = C:\Users\andre\Desktop\photo-software\DEV\PhotoboxBridge_test\src\Photobox.Bridge.Shared\
+build_property.EnableComHosting = 
+build_property.EnableGeneratedComInterfaceComImportInterop = 
+build_property.CsWinRTUseWindowsUIXamlProjections = false
+build_property.EffectiveAnalysisLevelStyle = 
+build_property.EnableCodeStyleSeverity = 

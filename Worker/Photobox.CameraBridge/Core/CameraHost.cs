@@ -13,6 +13,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
 using System.Reflection;
@@ -44,6 +45,10 @@ namespace Photobox.CameraBridge.Core
         public FrameHub FrameHub { get; } = new FrameHub();
         public LiveViewPump LiveView { get; }
         public bool HttpStreamingEnabled { get; set; }
+
+        // Nur für Timing-/Diagnose-Logging von außen (z.B. BridgeWorkerAdapter), siehe
+        // README_LiveView_Startverzoegerung.md. Kein funktionaler Zugriff.
+        public RingLogger Log => _log;
 
         // Thread-sicherer, gecachter Snapshot der zuletzt bekannten Kamera-Infos. Wird am Ende
         // jedes erfolgreichen RefreshAsync()/SelectCamera()/SelectCameraBySerial() auf dem
@@ -980,11 +985,24 @@ namespace Photobox.CameraBridge.Core
                 : (double?)null;
         }
 
-        public void StartLiveView()
+        public void StartLiveView() => StartLiveView(null);
+
+        /// <summary>
+        /// timingSw: optionale, von außen (z.B. BridgeWorkerAdapter) übergebene Stopwatch für
+        /// reines Diagnose-Timing (siehe README_LiveView_Startverzoegerung.md). Wird nur für
+        /// [LV-TIMING]-Logzeilen verwendet und an LiveViewPump.Start() weitergereicht, damit dort
+        /// bis zum ersten Frame mit derselben Uhr weitergemessen werden kann. Kein Einfluss auf
+        /// das eigentliche Verhalten.
+        /// </summary>
+        public void StartLiveView(Stopwatch timingSw)
         {
+            var sw = timingSw ?? Stopwatch.StartNew();
+
             _switchGate.Wait();
             try
             {
+                _log.Info($"[LV-TIMING] +{sw.ElapsedMilliseconds}ms T1 CameraHost.StartLiveView() entered (switchGate acquired)");
+
                 var cam = _mta.InvokeAsync(() =>
                 {
                     var c = Manager.SelectedCameraDevice;
@@ -996,6 +1014,7 @@ namespace Photobox.CameraBridge.Core
 
                 var profile = GetCameraProfile(cam, cam.Manufacturer, cam.DeviceName);
                 _log.Info($"StartLiveView profile={profile}, alreadyRunning={LiveView.IsRunning}, maker={cam.Manufacturer}, model={cam.DeviceName}, sdkType={cam.GetType().FullName}");
+                _log.Info($"[LV-TIMING] +{sw.ElapsedMilliseconds}ms T1b camera fetched from MTA thread, profile={profile}");
 
                 if (profile == CameraProfile.NikonDslr)
                 {
@@ -1012,8 +1031,10 @@ namespace Photobox.CameraBridge.Core
                         return;
                     }
 
+                    _log.Info($"[LV-TIMING] +{sw.ElapsedMilliseconds}ms T1c Nikon: calling StopLiveViewHardAsync() before start (auch wenn LiveView noch nicht lief - siehe README)");
                     StopLiveViewHardAsync().GetAwaiter().GetResult();
-                    LiveView.Start(cam, FrameHub);
+                    _log.Info($"[LV-TIMING] +{sw.ElapsedMilliseconds}ms T1d Nikon: StopLiveViewHardAsync() zurück, jetzt LiveView.Start()");
+                    LiveView.Start(cam, FrameHub, sw);
                     return;
                 }
 
@@ -1023,7 +1044,7 @@ namespace Photobox.CameraBridge.Core
                     return;
                 }
 
-                LiveView.Start(cam, FrameHub);
+                LiveView.Start(cam, FrameHub, sw);
             }
             finally
             {
@@ -1087,7 +1108,16 @@ namespace Photobox.CameraBridge.Core
         /// </summary>
         public async Task<bool> TryHardRecoverAsync()
         {
-            try { LiveView.Stop(); } catch { }
+            // WICHTIG: erst awaited stoppen (StopAsync wartet auf das Ende der LiveViewPump-
+            // Hintergrundschleife), dann erst die SDK-Verbindung schließen. Die vorherige
+            // fire-and-forget-Variante (LiveView.Stop(), setzt nur _cts.Cancel() und kehrt
+            // sofort zurück) hatte hier genau die Race Condition, die in
+            // UsbReconnectWatchdog.AttemptReconnect() bereits einmal gefunden und behoben wurde
+            // (siehe Kommentar dort): TryCloseSelectedCameraConnection() (cam.Close()) konnte
+            // ausgeführt werden, während die noch laufende RunLoop-Schleife im selben Moment
+            // cam.GetLiveViewImage() auf dem gerade geschlossenen SDK-Handle aufrief ->
+            // COMException 0x802A0002 ("Shutdown-Funktion bereits aufgerufen") im ~200ms-Takt.
+            try { await LiveView.StopAsync().ConfigureAwait(false); } catch { }
             try { TryCloseSelectedCameraConnection(); } catch { }
 
             try

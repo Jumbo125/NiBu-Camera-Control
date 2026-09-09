@@ -1,0 +1,5 @@
+is_global = true
+build_property.RootNamespace = Photobox.Bridge.WorkerIpc
+build_property.ProjectDir = C:\Users\AndreasRottmann\Desktop\photo-software\DEV\PhotoboxBridge\Worker\Photobox.Bridge.WorkerIpc\
+build_property.EnableComHosting = 
+build_property.EnableGeneratedComInterfaceComImportInterop = 

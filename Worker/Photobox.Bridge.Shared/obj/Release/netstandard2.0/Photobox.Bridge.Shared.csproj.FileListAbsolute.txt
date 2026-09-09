@@ -1,0 +1,8 @@
+C:\Users\andre\Desktop\photo-software\DEV\PhotoboxBridge_test\src\Photobox.Bridge.Shared\bin\Release\netstandard2.0\Photobox.Bridge.Shared.deps.json
+C:\Users\andre\Desktop\photo-software\DEV\PhotoboxBridge_test\src\Photobox.Bridge.Shared\bin\Release\netstandard2.0\Photobox.Bridge.Shared.dll
+C:\Users\andre\Desktop\photo-software\DEV\PhotoboxBridge_test\src\Photobox.Bridge.Shared\obj\Release\netstandard2.0\Photobox.Bridge.Shared.csproj.AssemblyReference.cache
+C:\Users\andre\Desktop\photo-software\DEV\PhotoboxBridge_test\src\Photobox.Bridge.Shared\obj\Release\netstandard2.0\Photobox.Bridge.Shared.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\andre\Desktop\photo-software\DEV\PhotoboxBridge_test\src\Photobox.Bridge.Shared\obj\Release\netstandard2.0\Photobox.Bridge.Shared.AssemblyInfoInputs.cache
+C:\Users\andre\Desktop\photo-software\DEV\PhotoboxBridge_test\src\Photobox.Bridge.Shared\obj\Release\netstandard2.0\Photobox.Bridge.Shared.AssemblyInfo.cs
+C:\Users\andre\Desktop\photo-software\DEV\PhotoboxBridge_test\src\Photobox.Bridge.Shared\obj\Release\netstandard2.0\Photobox.Bridge.Shared.csproj.CoreCompileInputs.cache
+C:\Users\andre\Desktop\photo-software\DEV\PhotoboxBridge_test\src\Photobox.Bridge.Shared\obj\Release\netstandard2.0\Photobox.Bridge.Shared.dll

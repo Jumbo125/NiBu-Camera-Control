@@ -352,9 +352,18 @@ namespace Photobox.CameraBridge.Ipc
         {
             ThrowIfRecoveryBlocksCameraOps();
 
+            // Reines Timing-Logging (siehe README_LiveView_Startverzoegerung.md) - misst,
+            // wie lange das IPC-Kommando ggf. am _gate wartet, bevor CameraHost.StartLiveView()
+            // überhaupt anläuft. Ändert kein Verhalten, nur zusätzliche Log-Zeilen.
+            var sw = Stopwatch.StartNew();
+            _host.Log.Info("[LV-TIMING] T0 StartLiveView IPC command received");
+
             await _gate.WaitAsync(ct).ConfigureAwait(false);
-            try { _host.StartLiveView(); }
+            _host.Log.Info($"[LV-TIMING] +{sw.ElapsedMilliseconds}ms T0b gate acquired, calling CameraHost.StartLiveView()");
+            try { _host.StartLiveView(sw); }
             finally { _gate.Release(); }
+
+            _host.Log.Info($"[LV-TIMING] +{sw.ElapsedMilliseconds}ms T-end CameraHost.StartLiveView() returned (synchroner Teil fertig; Frame-Timing folgt in separaten [LV-TIMING]-Zeilen aus LiveViewPump)");
         }
 
         public async Task StopLiveViewAsync(CancellationToken ct)

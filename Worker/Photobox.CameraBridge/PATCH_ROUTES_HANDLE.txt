@@ -1,0 +1,20 @@
+1) In deiner Routes.cs (in Routes.Handle ganz am Anfang, NACH evtl. bestehenden Auth/CORS Checks aber VOR dem restlichen Routing):
+
+    // Watchdog API (/api/watchdog)  [auth_key wird automatisch berücksichtigt]
+    if (WatchdogRoutes.TryHandle(ctx, settings, host, log))
+        return;
+
+   (Namespace ist Photobox.CameraBridge.Http, also ggf. oben ergänzen: using Photobox.CameraBridge.Http;)
+
+2) Optional (empfohlen): Wenn du in Routes.cs Start/Stop LiveView Endpoints hast, setze zusätzlich den Desired-Status:
+
+    // nach erfolgreichem StartLiveView:
+    //    watchdogLiveViewDesired = true
+    // -> falls du WatchdogRoutes/Wachdog Instanz nicht direkt hast, ruf im Erfolgsfall:
+    //    (Program.cs setzt initial AutoStartLiveView; für dynamische Starts/stops brauchst du das hier)
+
+   Variante A (wenn du die Watchdog-Instanz irgendwo speicherst):
+     watchdog.SetLiveViewDesired(true/false);
+
+   Variante B (minimal-invasiv): Lass es weg – Watchdog merkt sich LiveViewDesired nur vom Startup,
+   bzw. erkennt “war aktiv” über LiveView.IsRunning falls verfügbar.

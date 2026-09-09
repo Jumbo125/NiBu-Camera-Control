@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "dgSpecHash": "YYZtVupgd90=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\AndreasRottmann\\Desktop\\photo-software\\DEV\\PhotoboxBridge\\Worker\\Photobox.Bridge.Shared\\Photobox.Bridge.Shared.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\AndreasRottmann\\.nuget\\packages\\microsoft.netcore.platforms\\1.1.0\\microsoft.netcore.platforms.1.1.0.nupkg.sha512",
+    "C:\\Users\\AndreasRottmann\\.nuget\\packages\\netstandard.library\\2.0.3\\netstandard.library.2.0.3.nupkg.sha512"
+  ],
+  "logs": []
+}

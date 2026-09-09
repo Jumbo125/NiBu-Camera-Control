@@ -1,0 +1,95 @@
+{
+  "version": 3,
+  "targets": {
+    ".NETFramework,Version=v4.8": {
+      "Photobox.Bridge.Shared/1.0.0": {
+        "type": "project",
+        "framework": ".NETStandard,Version=v2.0",
+        "compile": {
+          "bin/placeholder/Photobox.Bridge.Shared.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Photobox.Bridge.Shared.dll": {}
+        }
+      }
+    },
+    ".NETFramework,Version=v4.8/win-x86": {
+      "Photobox.Bridge.Shared/1.0.0": {
+        "type": "project",
+        "framework": ".NETStandard,Version=v2.0",
+        "compile": {
+          "bin/placeholder/Photobox.Bridge.Shared.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/Photobox.Bridge.Shared.dll": {}
+        }
+      }
+    }
+  },
+  "libraries": {
+    "Photobox.Bridge.Shared/1.0.0": {
+      "type": "project",
+      "path": "../Photobox.Bridge.Shared/Photobox.Bridge.Shared.csproj",
+      "msbuildProject": "../Photobox.Bridge.Shared/Photobox.Bridge.Shared.csproj"
+    }
+  },
+  "projectFileDependencyGroups": {
+    ".NETFramework,Version=v4.8": [
+      "Photobox.Bridge.Shared >= 1.0.0"
+    ]
+  },
+  "packageFolders": {
+    "C:\\Users\\AndreasRottmann\\.nuget\\packages\\": {}
+  },
+  "project": {
+    "version": "1.0.0",
+    "restore": {
+      "projectUniqueName": "C:\\Users\\AndreasRottmann\\Desktop\\photo-software\\DEV\\PhotoboxBridge\\Worker\\Photobox.Bridge.WorkerIpc\\Photobox.Bridge.WorkerIpc.csproj",
+      "projectName": "Photobox.Bridge.WorkerIpc",
+      "projectPath": "C:\\Users\\AndreasRottmann\\Desktop\\photo-software\\DEV\\PhotoboxBridge\\Worker\\Photobox.Bridge.WorkerIpc\\Photobox.Bridge.WorkerIpc.csproj",
+      "packagesPath": "C:\\Users\\AndreasRottmann\\.nuget\\packages\\",
+      "outputPath": "C:\\Users\\AndreasRottmann\\Desktop\\photo-software\\DEV\\PhotoboxBridge\\Worker\\Photobox.Bridge.WorkerIpc\\obj\\",
+      "projectStyle": "PackageReference",
+      "configFilePaths": [
+        "C:\\Users\\AndreasRottmann\\AppData\\Roaming\\NuGet\\NuGet.Config"
+      ],
+      "originalTargetFrameworks": [
+        "net48"
+      ],
+      "sources": {
+        "https://api.nuget.org/v3/index.json": {}
+      },
+      "frameworks": {
+        "net48": {
+          "targetAlias": "net48",
+          "projectReferences": {
+            "C:\\Users\\AndreasRottmann\\Desktop\\photo-software\\DEV\\PhotoboxBridge\\Worker\\Photobox.Bridge.Shared\\Photobox.Bridge.Shared.csproj": {
+              "projectPath": "C:\\Users\\AndreasRottmann\\Desktop\\photo-software\\DEV\\PhotoboxBridge\\Worker\\Photobox.Bridge.Shared\\Photobox.Bridge.Shared.csproj"
+            }
+          }
+        }
+      },
+      "warningProperties": {
+        "warnAsError": [
+          "NU1605"
+        ]
+      },
+      "restoreAuditProperties": {
+        "enableAudit": "true",
+        "auditLevel": "low",
+        "auditMode": "direct"
+      }
+    },
+    "frameworks": {
+      "net48": {
+        "targetAlias": "net48",
+        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\8.0.423\\RuntimeIdentifierGraph.json"
+      }
+    },
+    "runtimes": {
+      "win-x86": {
+        "#import": []
+      }
+    }
+  }
+}
