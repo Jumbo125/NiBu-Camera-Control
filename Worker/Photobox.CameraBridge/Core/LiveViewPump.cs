@@ -29,6 +29,13 @@ namespace Photobox.CameraBridge.Core
         private CancellationTokenSource _cts;
         private Task _task;
 
+        // Reines Diagnose-Timing (siehe README_LiveView_Startverzoegerung.md). _startTimingSw wird
+        // in Start() gesetzt (von außen übergeben oder hier neu erzeugt) und misst bis zum ersten
+        // nach diesem Start empfangenen Frame. _firstFrameTimed sorgt dafür, dass danach nicht bei
+        // jedem weiteren Frame im Dauerbetrieb geloggt wird. Kein Einfluss auf das Verhalten.
+        private Stopwatch _startTimingSw;
+        private volatile bool _firstFrameTimed;
+
         // Dynamisch verstellbare FPS (thread-safe)
         private int _targetFps;
 
@@ -89,11 +96,22 @@ namespace Photobox.CameraBridge.Core
             _log.Info("LiveView target fps set to " + fps);
         }
 
-        public void Start(ICameraDevice cam, FrameHub hub)
+        public void Start(ICameraDevice cam, FrameHub hub) => Start(cam, hub, null);
+
+        /// <summary>
+        /// timingSw: optionale, von CameraHost.StartLiveView() durchgereichte Stopwatch für reines
+        /// [LV-TIMING]-Diagnoselogging (siehe README_LiveView_Startverzoegerung.md). Wird hier nur
+        /// gespeichert, um bis zum ersten Frame nach diesem Start damit weiterzumessen - kein
+        /// Einfluss auf das eigentliche Start-/Poll-Verhalten.
+        /// </summary>
+        public void Start(ICameraDevice cam, FrameHub hub, Stopwatch timingSw)
         {
             if (cam == null) throw new ArgumentNullException(nameof(cam));
             if (hub == null) throw new ArgumentNullException(nameof(hub));
             if (IsRunning) return;
+
+            _startTimingSw = timingSw ?? Stopwatch.StartNew();
+            _firstFrameTimed = false;
 
             // WICHTIG: den Fehlerzähler hier NICHT zurücksetzen. Wenn die Kamera in einen
             // dauerhaften "MTP device busy"-Zustand kippt, stößt der Aufrufer (ApiServer/Frontend)
@@ -152,8 +170,11 @@ namespace Photobox.CameraBridge.Core
         private async Task RunLoop(ICameraDevice cam, FrameHub hub, CancellationToken ct)
         {
             var sw = Stopwatch.StartNew();
+            var timingSw = _startTimingSw;
 
             _log.Info($"LiveViewPump starting (fps={TargetFps})");
+            if (timingSw != null)
+                _log.Info($"[LV-TIMING] +{timingSw.ElapsedMilliseconds}ms T2 RunLoop entered (Task.Run angelaufen)");
 
             try
             {
@@ -187,7 +208,14 @@ namespace Photobox.CameraBridge.Core
 
                 try
                 {
+                    var timingSwLoop = _firstFrameTimed ? null : _startTimingSw;
+                    if (timingSwLoop != null)
+                        _log.Info($"[LV-TIMING] +{timingSwLoop.ElapsedMilliseconds}ms T5 cam.GetLiveViewImage() poll attempt begin");
+
                     LiveViewData lv = await _mta.InvokeAsync(() => cam.GetLiveViewImage()).ConfigureAwait(false);
+
+                    if (timingSwLoop != null)
+                        _log.Info($"[LV-TIMING] +{timingSwLoop.ElapsedMilliseconds}ms T6 cam.GetLiveViewImage() returned, extracting JPEG");
 
                     if (TryExtractJpeg(lv, out var jpeg))
                     {
@@ -195,6 +223,16 @@ namespace Photobox.CameraBridge.Core
                         lastFrameAt = sw.Elapsed;
                         if (_consecutiveRestartFailures != 0)
                             Volatile.Write(ref _consecutiveRestartFailures, 0);
+
+                        if (timingSwLoop != null)
+                        {
+                            _log.Info($"[LV-TIMING] +{timingSwLoop.ElapsedMilliseconds}ms T7 erstes gültiges LiveView-Frame in FrameHub geschrieben (hub.Update) - Ende der Start-Zeitmessung");
+                            _firstFrameTimed = true;
+                        }
+                    }
+                    else if (timingSwLoop != null)
+                    {
+                        _log.Info($"[LV-TIMING] +{timingSwLoop.ElapsedMilliseconds}ms T6x kein gültiges JPEG in dieser Poll-Antwort, nächster Versuch folgt");
                     }
 
                     // KeepAlive (NotImplementedException wird abgefangen)
@@ -324,8 +362,13 @@ namespace Photobox.CameraBridge.Core
         // InitialStartRetryAttempts oben), bevor sie den kumulativen Fehlerzähler erreicht.
         private async Task StartLiveViewWithShortRetryAsync(ICameraDevice cam)
         {
+            var timingSw = _startTimingSw;
+
             for (int attempt = 1; ; attempt++)
             {
+                if (timingSw != null)
+                    _log.Info($"[LV-TIMING] +{timingSw.ElapsedMilliseconds}ms T3 SDK cam.StartLiveView() call begin (attempt {attempt})");
+
                 try
                 {
                     await _mta.InvokeAsync(() =>
@@ -333,10 +376,15 @@ namespace Photobox.CameraBridge.Core
                         cam.PreventShutDown = true;
                         cam.StartLiveView();
                     }).ConfigureAwait(false);
+
+                    if (timingSw != null)
+                        _log.Info($"[LV-TIMING] +{timingSw.ElapsedMilliseconds}ms T4 SDK cam.StartLiveView() call returned OK (attempt {attempt})");
                     return;
                 }
                 catch when (attempt < InitialStartRetryAttempts)
                 {
+                    if (timingSw != null)
+                        _log.Info($"[LV-TIMING] +{timingSw.ElapsedMilliseconds}ms T3x SDK cam.StartLiveView() attempt {attempt} failed transiently -> {InitialStartRetryDelay.TotalMilliseconds}ms Retry-Delay");
                     _log.Info($"LiveViewPump: initial StartLiveView attempt {attempt} failed transiently, retrying in {InitialStartRetryDelay.TotalMilliseconds}ms...");
                     await Task.Delay(InitialStartRetryDelay).ConfigureAwait(false);
                 }
