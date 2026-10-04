@@ -1,0 +1,1 @@
+ dotnet publish Photobox.Bridge.ApiServer.csproj -c Release -r win-x64 --self-contained true

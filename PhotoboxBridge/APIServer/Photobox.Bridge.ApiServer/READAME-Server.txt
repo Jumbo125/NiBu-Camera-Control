@@ -1,0 +1,143 @@
+Photobox CameraBridge – ApiServer API (Stand: aktuell)
+
+Auth-Regel
+- Wenn Bridge.AuthKey in ApiServer_settings.json leer ist ("") => Auth AUS => ALLE Endpoints ohne Key nutzbar
+- Wenn Bridge.AuthKey gesetzt ist (nicht leer) => Auth AN
+  - Public ohne Key: / , /api/status , /live.mjpg (bzw. Bridge.MjpegPath)
+  - Alles andere: Key erforderlich
+
+Key senden (nur wenn Auth AN)
+- Header: X-Api-Key: <KEY>
+  oder
+- Header: Authorization: Bearer <KEY>
+
+------------------------------------------------------------
+PUBLIC (kein Key, wenn Auth AN)
+------------------------------------------------------------
+
+GET /
+- Text: "OK. MJPEG: /live.mjpg" (oder konfiguriertes Bridge.MjpegPath)
+
+GET /live.mjpg
+- MJPEG Stream (multipart/x-mixed-replace)
+- Pfad ist konfigurierbar über Bridge.MjpegPath (Default: /live.mjpg)
+
+GET /api/status
+- Status JSON inkl. zusätzlichem Worker-Health:
+  workerReachable   (bool)
+  workerLastOkUtc   (ISO string|null)
+  workerLastError   (string|null)
+- plus bekannte Statusfelder (liveViewRunning, selected, frameAgeMs, etc.)
+
+------------------------------------------------------------
+PROTECTED (Key erforderlich, wenn Auth AN)
+------------------------------------------------------------
+
+Kameras / Auswahl / Refresh
+--------------------------
+GET /api/cameras
+- Liste verfügbarer Kameras (JSON)
+
+POST /api/select?serial=<SERIAL>
+- Kamera auswählen per Serial (Priorität)
+
+POST /api/select?id=<ID>
+- Kamera auswählen per ID
+
+POST /api/refresh?timeoutMs=4000
+- Soft Refresh (re-enumerate)
+- Responses:
+  200 "ok"
+  409 "busy"
+  504 "refresh_timeout"
+  500 "refresh_failed" (mapped)
+
+LiveView
+--------
+POST /api/liveview/start
+- Response: 200 "ok"
+
+POST /api/liveview/stop
+- Response: 200 "ok"
+
+GET /api/liveview/fps
+- Response JSON: { "fps": <int> }
+
+POST /api/liveview/fps?fps=<INT>
+POST /api/liveview/fps?value=<INT>
+- oder Body JSON: { "fps": 15 }
+- Response: 200 "ok"
+
+Settings
+--------
+GET /api/settings
+- Settings Snapshot JSON (ISO, Shutter, WhiteBalance, etc.)
+
+POST /api/settings
+- Body JSON Beispiel:
+  { "iso":"200", "shutter":"1/125", "whiteBalance":"Auto" }
+- Response: 200 "ok"
+
+Capture
+-------
+POST /api/capture
+- Body JSON (Beispiele):
+  { "mode":"file" }
+  { "mode":"jpeg" }
+
+- Responses:
+  mode="jpeg": 200 image/jpeg (binary)
+  mode="file": 200 application/json (z.B. { ok:true, file:"C:\...\shot.jpg" })
+
+- Fehler-Mapping (Beispiele):
+  409 device_busy
+  404 no_camera
+  422 cannot_focus
+  504 timeout
+  500 capture_failed
+
+Watchdog (geschützt)
+--------------------
+GET /api/watchdog
+- Response JSON: { "enabled": true/false }
+
+POST /api/watchdog?enabled=1
+POST /api/watchdog?enabled=0
+- Response JSON: { "enabled": true/false } (bzw. DTO)
+
+Worker Monitoring / Restart
+---------------------------
+GET /api/worker/reachable
+- Response JSON:
+  { "reachable": true/false, "lastOkUtc":"...", "lastError": "..." }
+
+GET /api/worker/ping
+- echter NamedPipe Ping (StatusGet)
+- Response JSON:
+  { "ok": true, "ms": <number> }
+  oder
+  { "ok": false, "ms": <number>, "error": "..." }
+
+POST /api/worker/restart
+- Startet Worker.exe (Worker hat Single-Instance und ersetzt alte Instanz selbst)
+- Response JSON:
+  { "ok": true, "error": null }
+  oder
+  { "ok": false, "error": "worker_exe_not_found" / "worker_exe_path_missing" / "cooldown" / "<msg>" }
+
+------------------------------------------------------------
+CORS
+------------------------------------------------------------
+- Global offen: AllowAnyOrigin / AllowAnyHeader / AllowAnyMethod
+
+------------------------------------------------------------
+Konfig (ApiServer_settings.json)
+------------------------------------------------------------
+Bridge:
+  BindAddress, Port, AuthKey, PipeName, MjpegPath
+Worker:
+  ExePath, Args, AutoStartOnBoot, AutoStartWhenUnreachable, StartCooldownMs, FailThreshold
+Health:
+  IntervalMs, TimeoutMs
+Logging:
+  LogFile (z.B. ApiServer_log.txt)

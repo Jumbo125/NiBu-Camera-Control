@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Photobox Live</title>
+    <style>
+      html, body{
+            overflow: hidden;
+      }
+      body {
+        font-family: Arial;
+        padding: 12px;
+		margin: 0;
+		padding: 0;
+      }
+      #err {
+        margin-top: 35vh;
+        padding: 8px;
+        border: 1px solid #c00;
+        background: #fee;
+        display: none;
+        justify-content: center;
+        align-content: center;
+        width: 50vw;
+        margin-left: 25vw;
+      }
+      #ok {
+        margin-top: 10px;
+        padding: 8px;
+        border: 1px solid #0a0;
+        background: #efe;
+        display: none;
+      }
+      img {
+        max-width: 100%;
+        
+        display: none;
+      }
+	  img#lv {
+			height: 100vh;
+			margin: 0 auto;
+		}
+    </style>
+    <script>
+  window.addEventListener('DOMContentLoaded', () => {
+  const params = new URLSearchParams(window.location.search);
+  const mirrored = params.get('mirror') === '1';
+
+  const ids = ['err', 'ok'];
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.style.transform = mirrored ? 'scaleX(-1)' : '';
+  });
+});
+
+    </script>
+  </head>
+  <body>
+    <!-- WICHTIG: Kein src am Anfang, sonst spammt der Browser die Konsole wenn 8051 down ist -->
+    <img id="lv" alt="LiveView" />
+
+    <div id="ok"></div>
+    <div id="err"></div>
+
+    <script>
+      const BASE = "http://127.0.0.1:8051";
+      const STATUS_URL = BASE + "/api/status";
+      const LIVE_URL = BASE + "/live.mjpg";
+
+      const ok = document.getElementById("ok");
+      const err = document.getElementById("err");
+      const lv = document.getElementById("lv");
+
+      function showOk(msg) {
+       // ok.style.display = "block";
+        err.style.display = "none";
+        ok.textContent = msg;
+      }
+      function showErr(msg) {
+        err.style.display = "flex";
+        ok.style.display = "none";
+        err.textContent = msg;
+      }
+
+      function startLive() {
+        if (lv.dataset.running === "1") return;
+        lv.src = LIVE_URL; // Stream starten erst wenn Bridge erreichbar ist
+        lv.style.display = "block";
+        lv.dataset.running = "1";
+      }
+
+      function stopLive() {
+        if (lv.dataset.running !== "1") return;
+        lv.src = ""; // Stream sauber beenden (verhindert Reconnect-Spam)
+        lv.style.display = "none";
+        lv.dataset.running = "0";
+      }
+
+      let backoffMs = 1000; // normal 1s
+      const BACKOFF_MAX = 30000; // max 30s bei Fehlern
+      let inFlight = false;
+
+      async function poll() {
+        if (inFlight) return; // verhindert Überlappung
+        inFlight = true;
+
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 1500);
+
+        try {
+          const r = await fetch(STATUS_URL, {
+            cache: "no-store",
+            signal: controller.signal,
+          });
+          if (!r.ok) throw new Error("HTTP " + r.status);
+
+          const s = await r.json();
+
+          // Bridge erreichbar -> Polling wieder schnell
+          backoffMs = 1000;
+
+          if (!s.selected) {
+            stopLive();
+            showErr("Keine Kamera ausgewählt.");
+          } else if (!s.liveViewRunning) {
+            stopLive();
+            showErr("LiveView läuft nicht. (POST /api/liveview/start)");
+          } else if (!s.framesActive) {
+            stopLive();
+            const age = (s.frameAgeMs == null) ? "?" : (s.frameAgeMs + "ms");
+            showErr("Keine LiveView-Frames (age=" + age + "). Ist eine Kamera angeschlossen und LiveView aktiv?");
+          } else {
+            const age = (s.frameAgeMs == null) ? "" : (" (age=" + s.frameAgeMs + "ms)");
+            showOk("OK: " + s.selected + age);
+            startLive();
+          }
+        } catch (e) {
+          // Bridge nicht erreichbar -> klare Meldung im Body
+          stopLive();
+          showErr(
+            "CameraBridge nicht erreichbar: Läuft camerabridge.exe und wurde der Server gestartet? (Port 8051)"
+          );
+
+          // Backoff, damit nicht 1000 Fehlrequests/Sekunde entstehen
+          backoffMs = Math.min(backoffMs * 2, BACKOFF_MAX);
+        } finally {
+          clearTimeout(timeout);
+          inFlight = false;
+          setTimeout(poll, backoffMs);
+        }
+      }
+
+      // Optional: Wenn Stream selbst Probleme macht (z.B. Bridge da, Stream endpoint nicht)
+      lv.addEventListener("error", () => {
+        // Kein console.log hier -> weniger Spam
+        showErr("LiveView-Stream nicht verfügbar (live.mjpg).");
+        stopLive();
+      });
+
+      poll();
+    </script>
+  </body>
+</html>

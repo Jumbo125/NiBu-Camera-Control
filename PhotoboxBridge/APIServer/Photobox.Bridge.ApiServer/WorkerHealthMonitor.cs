@@ -1,0 +1,280 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (c) 2026 Andreas Rottmann
+//
+// Datei: WorkerHealthMonitor.cs
+// Zweck: Überwacht die Erreichbarkeit des Workers im Hintergrund und stößt bei Bedarf einen Neustart an.
+// Projekt: Photobox CameraBridge ApiServer
+//
+// Aufgaben:
+// - periodische Statusabfrage per IPC
+// - Fehler- und Timeout-Erkennung
+// - Reachability-State aktualisieren
+// - automatischen Worker-Start bei längerer Nichterreichbarkeit auslösen
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
+using Photobox.Bridge.Shared;
+using Serilog;
+
+namespace Photobox.Bridge.ApiServer;
+
+public sealed class WorkerHealthMonitor : BackgroundService
+{
+    // Eigener Pipe-Kanal (siehe HealthPipeClient), NICHT der Kommando-Singleton: sonst blockiert
+    // jeder Capture/Refresh/WaitNextFrame-Longpoll den Health-Ping schon beim Gate-Wait, auch
+    // bei völlig gesunder Kamera (FIX_PLAN.md Fix 2).
+    private readonly HealthPipeClient _ipc;
+    private readonly WorkerHealthState _state;
+    private readonly HealthSettings _health;
+    private readonly WorkerSettings _worker;
+    private readonly WorkerProcessManager _pm;
+    private readonly Serilog.ILogger _log = Log.ForContext<WorkerHealthMonitor>();
+
+    private int _failsInRow = 0;
+    private bool? _lastReachable = null;
+
+    // Down-Flapping verhindern: "wirklich down seit..."
+    private DateTime? _downSinceUtc = null;
+
+    // Restart-Gating gegen Thrashing
+    private int _startInFlight = 0;
+    private DateTime _nextStartAllowedUtc = DateTime.MinValue;
+    private DateTime _startupGraceUntilUtc = DateTime.MinValue;
+
+    // Initiale Grace-Period: Startet ab Konstruktor, damit boot-time Worker-Start
+    // nicht sofort als "connection LOST" gewertet wird.
+    private static readonly TimeSpan InitialBootGrace = TimeSpan.FromSeconds(20);
+
+    // Defaults / Tunables
+    private const int DefaultIntervalMs = 2000;
+    private const int DefaultTimeoutMs  = 8000;   // sinnvoller Default als 800ms
+    private const int RestartCooldownMs = 10000;  // min Abstand zwischen Starts
+    private const int StartupGraceMs    = 15000;  // Zeit geben nach Start
+    private const int MinDownMsBeforeRestart = 20000; // erst nach 20s "wirklich down" neu starten
+
+    // Diagnose-Hinweise gegen reine Wiederholungsmeldungen ohne Mehrwert.
+    private const int HintAfterFails = 5;          // ~10s Dauerfehler -> einmaliger Hinweis pro Down-Episode
+    private const int EscalationRestartCount = 3;  // ab X Neustarts ohne Recovery -> Hardware-Hinweis
+    private bool _hintLoggedThisEpisode = false;
+    private int _restartsWithoutRecovery = 0;
+
+    public WorkerHealthMonitor(
+        HealthPipeClient ipc,
+        WorkerHealthState state,
+        IOptions<HealthSettings> health,
+        IOptions<WorkerSettings> worker,
+        WorkerProcessManager pm)
+    {
+        _ipc = ipc;
+        _state = state;
+        _health = health.Value;
+        _worker = worker.Value;
+        _pm = pm;
+
+        // Boot-Grace: Verhindert sofortige "connection LOST"-Meldung wenn der Worker
+        // gerade erst über AutoStartOnBoot gestartet wurde und noch initialisiert.
+        _startupGraceUntilUtc = DateTime.UtcNow.Add(InitialBootGrace);
+    }
+
+    /// <summary>
+    /// Setzt Grace-Period und Cooldown zurück, wenn extern ein Worker-Start ausgelöst wurde
+    /// (z.B. über AutoStartOnBoot oder manuellen API-Restart).
+    /// </summary>
+    public void NotifyWorkerStarted()
+    {
+        var now = DateTime.UtcNow;
+        _startupGraceUntilUtc = now.AddMilliseconds(StartupGraceMs);
+        _nextStartAllowedUtc  = now.AddMilliseconds(RestartCooldownMs);
+        _downSinceUtc         = null;
+        _failsInRow           = 0;
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        // Heartbeat-Intervall: wenn nicht gesetzt, default 2000ms
+        var intervalMs = _health.IntervalMs > 0 ? _health.IntervalMs : DefaultIntervalMs;
+
+        // Timeout: wenn nicht gesetzt, default (deutlich höher als 800ms)
+        var timeoutMs = _health.TimeoutMs > 0 ? _health.TimeoutMs : DefaultTimeoutMs;
+
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            var ok = false;
+            string? err = null;
+            WorkerStatusDto? workerStatus = null;
+
+            try
+            {
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                cts.CancelAfter(timeoutMs);
+
+                workerStatus = await _ipc.CallAsync<WorkerStatusDto>(Commands.StatusGet, null, cts.Token);
+                _state.SetOk(workerStatus);
+                ok = true;
+            }
+            catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
+            {
+                // Das ist praktisch immer CancelAfter(timeout)
+                err = $"timeout({timeoutMs}ms)";
+            }
+            catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
+            {
+                err = ex.Message;
+            }
+
+            if (ok)
+            {
+                var wasDown = (_lastReachable == false) || (_failsInRow > 0);
+
+                _failsInRow = 0;
+                _downSinceUtc = null;
+                _hintLoggedThisEpisode = false;
+                _restartsWithoutRecovery = 0;
+
+                // Optional: nur bei Zustandswechsel ins File loggen
+                if (wasDown)
+                {
+                    try { _log.Warning("Worker connection RESTORED."); } catch { }
+                    TryWriteLine("[Health] Worker connection RESTORED");
+                }
+
+                // Heartbeat (alle IntervalMs). CameraResponsive=false bedeutet nur, dass die Kamera
+                // gerade nicht reagiert (z.B. dauerhaft busy) - der Worker-Prozess selbst ist
+                // erreichbar und läuft, das ist HIER bereits alles was zählt. Kein Respawn deswegen:
+                // Kamera-Recovery ist Sache des Workers (UsbReconnectWatchdog + Stuck-Signal).
+                var s = _state.Snapshot();
+                TryWriteLine($"[Health] Worker=OK failsInRow=0 lastOkUtc={s.LastOkUtc:O} cameraResponsive={workerStatus?.CameraResponsive}");
+                _lastReachable = true;
+            }
+            else
+            {
+                _failsInRow++;
+                _state.SetFail(new Exception(err ?? "unknown_error"));
+
+                if (_lastReachable != false)
+                {
+                    try { _log.Warning("Worker connection LOST."); } catch { }
+                    TryWriteLine("[Health] Worker connection LOST");
+                }
+
+                var s = _state.Snapshot();
+                TryWriteLine($"[Health] Worker=DOWN failsInRow={_failsInRow} lastOkUtc={(s.LastOkUtc.HasValue ? s.LastOkUtc.Value.ToString("O") : "-")} error={s.LastError}");
+
+                // Down-Timer starten (nur einmal)
+                var now = DateTime.UtcNow;
+                _downSinceUtc ??= now;
+                var downForMs = (now - _downSinceUtc.Value).TotalMilliseconds;
+
+                // Reine Wiederholung von "not reachable" bringt nach ein paar Malen nichts mehr -
+                // einmal pro Down-Episode einen Hinweis loggen, was das wahrscheinlich bedeutet.
+                if (!_hintLoggedThisEpisode && _failsInRow >= HintAfterFails)
+                {
+                    _hintLoggedThisEpisode = true;
+                    try
+                    {
+                        _log.Warning(
+                            "Worker pipe seit {Fails} Versuchen (~{Sec}s) nicht erreichbar. Wahrscheinlichste " +
+                            "Ursache: Kamera/USB-Gerät ist zwar physisch vorhanden, antwortet aber nicht mehr " +
+                            "(SDK-Aufruf hängt), nicht ein abgestürzter Worker-Prozess. Falls das nicht von " +
+                            "selbst wieder geht, wird nach {DownMs}ms automatisch ein USB-Reset (Klasse " +
+                            "WPD/Camera/Image) versucht und der Worker neu gestartet.",
+                            _failsInRow, (int)(downForMs / 1000.0), MinDownMsBeforeRestart);
+                    }
+                    catch { }
+                }
+
+                // Autostart: nur wenn "wirklich down" UND nicht in Grace UND nicht zu oft UND nicht parallel
+                var threshold = Math.Max(1, _worker.FailThreshold);
+                var inGrace = now < _startupGraceUntilUtc;
+
+                if (_worker.AutoStartWhenUnreachable &&
+                    !inGrace &&
+                    _failsInRow >= threshold &&
+                    downForMs >= MinDownMsBeforeRestart &&
+                    now >= _nextStartAllowedUtc &&
+                    Interlocked.CompareExchange(ref _startInFlight, 1, 0) == 0)
+                {
+                    _nextStartAllowedUtc = now.AddMilliseconds(RestartCooldownMs);
+                    _startupGraceUntilUtc = now.AddMilliseconds(StartupGraceMs);
+
+                    _restartsWithoutRecovery++;
+
+                    // UsbCameraReset (Disable/Enable-DevNode) nur als LETZTE Eskalation, nie bei
+                    // jedem Neustart: der Reset zieht einem gerade laufenden Worker mitten im
+                    // Refresh/Startup die SDK-Session weg und verlängert damit den Sturm, statt
+                    // ihn zu beenden (FIX_PLAN.md Fix 5). Erst ab EscalationRestartCount
+                    // bestätigten Prozess-Toden in Folge versuchen, dann mit steigendem Backoff.
+                    var escalate = _restartsWithoutRecovery >= EscalationRestartCount;
+
+                    if (escalate)
+                    {
+                        try
+                        {
+                            _log.Warning(
+                                "Worker wurde {Count}x hintereinander neu gestartet, ohne dass die Verbindung " +
+                                "stabil wiederkam. Das deutet auf ein Hardware-/USB-Problem hin (Kamera aus, " +
+                                "Kabel/Hub locker, Gerät hängt), nicht auf einen Software-Bug im Worker — " +
+                                "bitte Kamera-Stromversorgung und USB-Verbindung prüfen.",
+                                _restartsWithoutRecovery);
+                        }
+                        catch { }
+                    }
+
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            if (escalate)
+                            {
+                                // Deutlicher, wachsender Backoff vor dem Reset selbst: gibt einem
+                                // Worker, der zufällig gerade noch im Refresh/Startup steckt, eine
+                                // reelle Chance, von selbst fertig zu werden, bevor wir ihm hart die
+                                // SDK-Session wegziehen.
+                                var backoff = TimeSpan.FromSeconds(Math.Min(60, 10 * (_restartsWithoutRecovery - EscalationRestartCount + 1)));
+                                _log.Information("USB-Kamera-Reset Eskalation: warte {Backoff}s vor Reset.", backoff.TotalSeconds);
+                                try { await Task.Delay(backoff, CancellationToken.None); } catch { }
+
+                                try
+                                {
+                                    var (found, resetOk) = UsbCameraReset.ResetCameraClassDevices(_log);
+                                    _log.Information(
+                                        "Worker unreachable -> USB-Kamera-Reset (letzte Eskalation) versucht (found={Found}, ok={Ok}).",
+                                        found, resetOk);
+                                }
+                                catch (Exception ex)
+                                {
+                                    try { _log.Warning(ex, "USB-Kamera-Reset fehlgeschlagen."); } catch { }
+                                }
+                            }
+
+                            await _pm.EnsureStartedAsync("pipe_unreachable", CancellationToken.None);
+                        }
+                        catch (Exception ex)
+                        {
+                            try { _log.Error(ex, "EnsureStartedAsync failed"); } catch { }
+                        }
+                        finally
+                        {
+                            Interlocked.Exchange(ref _startInFlight, 0);
+                        }
+                    });
+                }
+
+                // File-Log bei Fehler ok (aber Achtung: kann viel werden)
+                try { _log.Information("Worker pipe not reachable (failsInRow={Fails}). {Msg}", _failsInRow, err); } catch { }
+
+                _lastReachable = false;
+            }
+
+            try { await Task.Delay(intervalMs, stoppingToken); }
+            catch { /* ignore */ }
+        }
+    }
+
+    private static void TryWriteLine(string msg)
+    {
+        try { Console.WriteLine(msg); } catch { }
+    }
+}

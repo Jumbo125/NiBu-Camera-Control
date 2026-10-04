@@ -1,0 +1,16 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../Photobox.Bridge.Shared"
+		},
+		{
+			"path": "../Photobox.Bridge.WorkerIpc"
+		},
+		{
+			"path": "../Photobox.Bridge.WorkerMock"
+		}
+	]
+}
