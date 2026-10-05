@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fotobox WebView2 Host - config and JavaScript examples</title>
+  <style>
+    :root {
+      --bg: #ffffff;
+      --panel: #f7f7f8;
+      --border: #d9d9de;
+      --text: #1f2328;
+      --muted: #5b6470;
+      --accent: #1769e0;
+      --accent-dark: #0f4fb0;
+      --code: #f3f4f6;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Arial, Helvetica, sans-serif;
+      line-height: 1.55;
+    }
+
+    .page {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 24px auto 48px;
+    }
+
+    .hero, .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 18px;
+    }
+
+    .hero h1, .card h2, .card h3 { margin: 0 0 12px; }
+    p, li { margin: 0 0 10px; }
+    ul { padding-left: 20px; margin: 10px 0 0; }
+    .muted { color: var(--muted); }
+
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    button {
+      border: 0;
+      border-radius: 10px;
+      padding: 12px 16px;
+      font-size: 15px;
+      cursor: pointer;
+      background: var(--accent);
+      color: #fff;
+    }
+    button:hover { background: var(--accent-dark); }
+    button.secondary { background: #707784; }
+
+    code {
+      background: var(--code);
+      padding: 2px 6px;
+      border-radius: 6px;
+      font-family: Consolas, Menlo, monospace;
+    }
+
+    pre {
+      margin: 0;
+      background: var(--code);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: Consolas, Menlo, monospace;
+      font-size: 14px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+      background: #fff;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+
+    th, td {
+      text-align: left;
+      vertical-align: top;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      font-size: 14px;
+    }
+    th { background: #f1f3f5; }
+    tr:last-child td { border-bottom: 0; }
+
+    .section-nav a {
+      display: inline-block;
+      margin: 0 10px 10px 0;
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <h1>Fotobox WebView2 Host</h1>
+      <p><strong>English:</strong> This local page documents <code>init.json</code> and shows ready-to-copy JavaScript examples for the WebView2 host bridge.</p>
+      <p><strong>Deutsch:</strong> Diese lokale Seite dokumentiert die <code>init.json</code> und zeigt direkt kopierbare JavaScript-Beispiele für die WebView2-Host-Bridge.</p>
+      <div class="section-nav">
+        <a href="#config-de">Konfiguration DE</a>
+        <a href="#config-en">Configuration EN</a>
+        <a href="#js-de">JavaScript DE</a>
+        <a href="#js-en">JavaScript EN</a>
+      </div>
+      <p class="muted">No external sources are used. White background. Closing no longer requires a password.</p>
+      <p class="muted">Keine externen Quellen. Weißer Hintergrund. Zum Beenden ist kein Passwort mehr nötig.</p>
+    </section>
+
+    <section class="card">
+      <h2>Quick test / Schnelltest</h2>
+      <p class="muted">These buttons call the same host bridge that your own page can call.</p>
+      <div class="row">
+        <button id="btnMin">Minimize / Minimieren</button>
+        <button id="btnMax">Kiosk on / Kiosk an</button>
+        <button id="btnRestore" class="secondary">Restore / Wiederherstellen</button>
+        <button id="btnKioskOn" class="secondary">setKiosk(true)</button>
+        <button id="btnKioskOff" class="secondary">setKiosk(false)</button>
+        <button id="btnExit">Exit / Beenden</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Example <code>init.json</code></h2>
+      <pre>{
+  "url": "127.0.0.1/fotobox/index.html",
+  "defaultUrl": "http://127.0.0.1",
+  "defaultPort": 8080,
+  "localIndexPath": "wwwroot/index.html",
+  "kiosk": false,
+  "title": "Fotobox Kiosk",
+  "icon": "Assets/app.ico",
+  "minimizeToTray": true,
+  "allowDevTools": false
+}</pre>
+    </section>
+
+    <section id="config-de" class="card">
+      <h2>Konfiguration komplett auf Deutsch</h2>
+      <table>
+        <thead>
+          <tr><th>Schlüssel</th><th>Bedeutung</th><th>Beispiele</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>url</code></td>
+            <td>Bevorzugtes Startziel. Darf eine vollständige Web-URL, eine URL ohne Schema oder ein lokaler Dateipfad relativ zur <code>init.json</code> sein.</td>
+            <td><code>https://example.com/app</code><br><code>127.0.0.1/kiosk</code><br><code>localhost:8080/ui</code><br><code>pages/start.html</code></td>
+          </tr>
+          <tr>
+            <td><code>defaultUrl</code></td>
+            <td>Fallback-Basisadresse, wenn weder <code>url</code> noch <code>localIndexPath</code> nutzbar sind. Ohne Schema wird automatisch <code>http://</code> ergänzt.</td>
+            <td><code>http://127.0.0.1</code><br><code>192.168.0.50</code><br><code>localhost</code></td>
+          </tr>
+          <tr>
+            <td><code>defaultPort</code></td>
+            <td>Port für <code>defaultUrl</code>. Wird nur für den Fallback verwendet.</td>
+            <td><code>8080</code><br><code>5000</code></td>
+          </tr>
+          <tr>
+            <td><code>localIndexPath</code></td>
+            <td>Lokale Datei relativ zur <code>init.json</code>. Wird verwendet, wenn <code>url</code> leer oder ungültig ist.</td>
+            <td><code>wwwroot/index.html</code><br><code>site/start.html</code></td>
+          </tr>
+          <tr>
+            <td><code>kiosk</code></td>
+            <td>Startet das Fenster direkt im Kioskmodus, wenn <code>true</code>.</td>
+            <td><code>true</code> oder <code>false</code></td>
+          </tr>
+          <tr>
+            <td><code>title</code></td>
+            <td>Überschreibt den hart codierten Fenstertitel. Wenn leer, bleibt der Titel aus dem Code aktiv.</td>
+            <td><code>Fotobox Kiosk</code></td>
+          </tr>
+          <tr>
+            <td><code>icon</code></td>
+            <td>Pfad zu einer <code>.ico</code>-Datei relativ zur <code>init.json</code>. Wenn leer oder nicht gefunden, wird das eingebaute Fallback-Icon verwendet.</td>
+            <td><code>Assets/app.ico</code><br><code>branding/fotobox.ico</code></td>
+          </tr>
+          <tr>
+            <td><code>minimizeToTray</code></td>
+            <td>Wenn <code>true</code>, wird beim Minimieren in den Tray minimiert.</td>
+            <td><code>true</code></td>
+          </tr>
+          <tr>
+            <td><code>allowDevTools</code></td>
+            <td>Schaltet Developer Tools und Standard-Kontextmenüs frei. Für Produktions-Kiosk meist <code>false</code>.</td>
+            <td><code>false</code></td>
+          </tr>
+        </tbody>
+      </table>
+      <ul>
+        <li><code>url</code> kann auf lokale HTML-Dateien zeigen.</li>
+        <li>Eine lokale <code>.php</code>-Datei wird dabei nicht als PHP ausgeführt. Für PHP brauchst du eine Server-URL wie <code>http://127.0.0.1:8080/index.php</code>.</li>
+        <li>Beenden über Fenster-X und per JavaScript ist jetzt ohne Passwort möglich.</li>
+      </ul>
+    </section>
+
+    <section id="config-en" class="card">
+      <h2>Complete configuration in English</h2>
+      <table>
+        <thead>
+          <tr><th>Key</th><th>Meaning</th><th>Examples</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>url</code></td>
+            <td>Preferred startup target. It can be a full web URL, a host/path without schema, or a local file path relative to <code>init.json</code>.</td>
+            <td><code>https://example.com/app</code><br><code>127.0.0.1/kiosk</code><br><code>localhost:8080/ui</code><br><code>pages/start.html</code></td>
+          </tr>
+          <tr>
+            <td><code>defaultUrl</code></td>
+            <td>Fallback base address if neither <code>url</code> nor <code>localIndexPath</code> can be used. If no scheme is given, <code>http://</code> is added automatically.</td>
+            <td><code>http://127.0.0.1</code><br><code>192.168.0.50</code><br><code>localhost</code></td>
+          </tr>
+          <tr>
+            <td><code>defaultPort</code></td>
+            <td>Port for <code>defaultUrl</code>. Used only for the fallback target.</td>
+            <td><code>8080</code><br><code>5000</code></td>
+          </tr>
+          <tr>
+            <td><code>localIndexPath</code></td>
+            <td>Local file relative to <code>init.json</code>. Used when <code>url</code> is empty or invalid.</td>
+            <td><code>wwwroot/index.html</code><br><code>site/start.html</code></td>
+          </tr>
+          <tr>
+            <td><code>kiosk</code></td>
+            <td>Starts the window directly in kiosk mode when <code>true</code>.</td>
+            <td><code>true</code> or <code>false</code></td>
+          </tr>
+          <tr>
+            <td><code>title</code></td>
+            <td>Overrides the hardcoded window title. If empty, the title from code stays active.</td>
+            <td><code>Fotobox Kiosk</code></td>
+          </tr>
+          <tr>
+            <td><code>icon</code></td>
+            <td>Path to an <code>.ico</code> file relative to <code>init.json</code>. If empty or missing, the compiled fallback icon is used.</td>
+            <td><code>Assets/app.ico</code><br><code>branding/fotobox.ico</code></td>
+          </tr>
+          <tr>
+            <td><code>minimizeToTray</code></td>
+            <td>If <code>true</code>, minimizing sends the app to the tray.</td>
+            <td><code>true</code></td>
+          </tr>
+          <tr>
+            <td><code>allowDevTools</code></td>
+            <td>Enables developer tools and default context menus. Usually <code>false</code> for production kiosk usage.</td>
+            <td><code>false</code></td>
+          </tr>
+        </tbody>
+      </table>
+      <ul>
+        <li><code>url</code> can point to local HTML files.</li>
+        <li>A local <code>.php</code> file is not executed as PHP. For PHP you need a server URL such as <code>http://127.0.0.1:8080/index.php</code>.</li>
+        <li>Closing by window X and via JavaScript now works without a password.</li>
+      </ul>
+    </section>
+
+    <section id="js-de" class="card">
+      <h2>JavaScript-Beispiele auf Deutsch</h2>
+      <h3>1) Minimieren</h3>
+      <pre>if (window.hostApp) {
+  window.hostApp.minimize();
+}</pre>
+      <h3>2) Kioskmodus aktivieren</h3>
+      <pre>if (window.hostApp) {
+  window.hostApp.maximize();
+}
+
+// oder explizit
+if (window.hostApp) {
+  window.hostApp.setKiosk(true);
+}</pre>
+      <h3>3) Kioskmodus verlassen und Fenster normal anzeigen</h3>
+      <pre>if (window.hostApp) {
+  window.hostApp.restore();
+}
+
+// oder explizit
+if (window.hostApp) {
+  window.hostApp.setKiosk(false);
+}</pre>
+      <h3>4) Programm beenden</h3>
+      <pre>if (window.hostApp) {
+  window.hostApp.exit();
+}
+
+// alias
+if (window.hostApp) {
+  window.hostApp.close();
+}</pre>
+      <h3>5) Button direkt verbinden</h3>
+      <pre>&lt;button id="exitButton"&gt;Beenden&lt;/button&gt;
+&lt;script&gt;
+  document.getElementById('exitButton').addEventListener('click', () =&gt; {
+    if (window.hostApp) {
+      window.hostApp.exit();
+    }
+  });
+&lt;/script&gt;</pre>
+    </section>
+
+    <section id="js-en" class="card">
+      <h2>JavaScript examples in English</h2>
+      <h3>1) Minimize</h3>
+      <pre>if (window.hostApp) {
+  window.hostApp.minimize();
+}</pre>
+      <h3>2) Enter kiosk mode</h3>
+      <pre>if (window.hostApp) {
+  window.hostApp.maximize();
+}
+
+// or explicit
+if (window.hostApp) {
+  window.hostApp.setKiosk(true);
+}</pre>
+      <h3>3) Leave kiosk mode and show normal window</h3>
+      <pre>if (window.hostApp) {
+  window.hostApp.restore();
+}
+
+// or explicit
+if (window.hostApp) {
+  window.hostApp.setKiosk(false);
+}</pre>
+      <h3>4) Exit application</h3>
+      <pre>if (window.hostApp) {
+  window.hostApp.exit();
+}
+
+// alias
+if (window.hostApp) {
+  window.hostApp.close();
+}</pre>
+      <h3>5) Wire a button directly</h3>
+      <pre>&lt;button id="exitButton"&gt;Exit&lt;/button&gt;
+&lt;script&gt;
+  document.getElementById('exitButton').addEventListener('click', () =&gt; {
+    if (window.hostApp) {
+      window.hostApp.exit();
+    }
+  });
+&lt;/script&gt;</pre>
+    </section>
+  </main>
+
+  <script>
+    const byId = (id) => document.getElementById(id);
+    byId('btnMin').addEventListener('click', () => window.hostApp?.minimize());
+    byId('btnMax').addEventListener('click', () => window.hostApp?.maximize());
+    byId('btnRestore').addEventListener('click', () => window.hostApp?.restore());
+    byId('btnKioskOn').addEventListener('click', () => window.hostApp?.setKiosk(true));
+    byId('btnKioskOff').addEventListener('click', () => window.hostApp?.setKiosk(false));
+    byId('btnExit').addEventListener('click', () => window.hostApp?.exit());
+  </script>
+</body>
+</html>

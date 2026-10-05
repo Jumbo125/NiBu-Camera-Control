@@ -1,0 +1,1 @@
+dotnet publish .\NiBuLauncher.csproj -c Release

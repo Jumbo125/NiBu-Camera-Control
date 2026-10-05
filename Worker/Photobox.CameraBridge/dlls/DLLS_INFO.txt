@@ -1,0 +1,17 @@
+Dieser Ordner (dlls/) ist NICHT Teil des Repos (siehe .gitignore).
+
+Enthaltene Dateien (vor dem Build hier wieder ablegen):
+  - EDSDK.dll, EdsImage.dll   -> Canon EOS Digital SDK (EDSDK), proprietär,
+                                 bezogen über digiCamControl
+                                 (https://github.com/dukus/digiCamControl).
+                                 Canon-Lizenz erforderlich, nicht öffentlich
+                                 weitergeben.
+  - vcruntime140.dll, msvcp140.dll, concrt140.dll, vcamp140.dll,
+    vccorlib140.dll, vcomp140.dll
+                                -> Microsoft Visual C++ Redistributable
+                                   Runtime. Download:
+                                   https://aka.ms/vs/17/release/vc_redist.x64.exe
+  - usb_relay_device.dll       -> USB-Relay-Treiber-DLL, Quelle/Hersteller
+                                   prüfen vor Weitergabe.
+
+Nach dem Klonen hier ablegen, bevor Photobox.CameraBridge gebaut wird.

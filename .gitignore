@@ -1,0 +1,27 @@
+# Eigenständige Vendor-/Tool-Ordner, kein Teil dieses Repos
+/DNP/
+/DNP2/
+/EDSDKv132010W/
+/ProcDump/
+/signieren/
+
+# .NET / C++ Build-Output
+bin/
+obj/
+*.pdb
+*.ilk
+
+# CMake Build-Output (Browser/Browser_Linux)
+build/
+
+# Claude-/VSCode-Arbeitsdaten
+.claude/
+.vscode/
+
+# Fremde DLLs (Canon EDSDK via digiCamControl, VC++ Runtime, AForge.NET,
+# weitere Referenz-Libraries) - nicht frei weiterverteilbar / nicht hier
+# versioniert. Siehe DLLS_INFO.txt im jeweiligen Ordner.
+Worker/Photobox.CameraBridge/dlls/*
+!Worker/Photobox.CameraBridge/dlls/DLLS_INFO.txt
+Worker/refs/*
+!Worker/refs/DLLS_INFO.txt

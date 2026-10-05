@@ -1,0 +1,22 @@
+Dieser Ordner (refs/) ist NICHT Teil des Repos (siehe .gitignore).
+
+Enthaltene Referenz-Libraries (vor dem Build hier wieder ablegen):
+  - AForge.dll, AForge.Imaging.dll, AForge.Imaging.Formats.dll,
+    AForge.Math.dll (+ zugehörige .xml Doku-Dateien)
+                                -> AForge.NET, LGPL-Lizenz.
+                                   https://github.com/andrewkirillov/AForge.NET
+  - Gma.QrCodeNet.Encoding.dll  -> MIT-Lizenz.
+                                   https://github.com/manuelbl/QrCodeGenerator
+                                   (oder Original-NuGet-Paket "QRCodeEncoderLibrary"
+                                   je nach verwendeter Quelle prüfen)
+  - Interop.PortableDeviceApiLib.dll, Interop.PortableDeviceTypesLib.dll,
+    Interop.WIA.dll, wiaaut.dll
+                                -> COM-Interop-Assemblies für Windows Portable
+                                   Devices / WIA, generiert aus Windows-SDK-
+                                   Typbibliotheken.
+  - WPFToolkit.Extended.dll     -> WPF Extended Toolkit (Xceed Community
+                                   Edition), Microsoft Public License (Ms-PL).
+  - pdapi2_0.il, pdapi2_0.res   -> zugehörige IL-/Resource-Dateien, Quelle
+                                   gemeinsam mit den Interop-DLLs prüfen.
+
+Nach dem Klonen hier ablegen, bevor der Worker gebaut wird.
