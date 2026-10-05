@@ -41,3 +41,14 @@ Worker/PortableDeviceLib/
 # übergeordnete Solution über alle DEV-Projekte)
 /DEV.sln
 /befehele nikon.txt
+
+# Interne Arbeitsnotizen/Session-Artefakte, nicht für GitHub gedacht
+/API_WORKER_LOGIK.md
+/CAMERA_RECOVERY_CIRCUIT_BREAKER.md
+/FIX_PLAN.md
+/änderungen_04_08_26.txt
+/README_Photobox_CameraBridge_ApiServer_Worker.txt
+
+# Veraltete Solution-Datei (referenziert alte src\...-Pfade, nicht mehr
+# gültig nach der Restrukturierung)
+/PhotoboxBridge.sln
