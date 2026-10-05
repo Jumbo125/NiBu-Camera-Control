@@ -26,9 +26,14 @@ Worker/Photobox.CameraBridge/dlls/*
 Worker/refs/*
 !Worker/refs/DLLS_INFO.txt
 
-# Code/Binaries ursprünglich aus digiCamControl (LGPL/GPL, nicht hier
+# Code/Binaries ursprünglich aus digiCamControl (MIT-lizenziert, nicht hier
 # versioniert). Siehe WORKER_EXTERNAL_INFO.txt.
-Worker/CameraControl.Devices/
+# Ausnahme: NikonD3300.cs ist eine eigene Erweiterung (eigener
+# Copyright-Zusatz), bleibt daher im Repo.
+Worker/CameraControl.Devices/*
+!Worker/CameraControl.Devices/Nikon/
+Worker/CameraControl.Devices/Nikon/*
+!Worker/CameraControl.Devices/Nikon/NikonD3300.cs
 Worker/Canon.Eos.Framework/
 Worker/PortableDeviceLib/
 

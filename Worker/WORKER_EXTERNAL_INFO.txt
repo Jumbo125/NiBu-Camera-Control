@@ -1,14 +1,18 @@
 Folgende Ordner sind NICHT Teil dieses Repos (siehe .gitignore):
 
-  - CameraControl.Devices/
+  - CameraControl.Devices/   (außer Nikon/NikonD3300.cs, siehe unten)
   - Canon.Eos.Framework/
   - PortableDeviceLib/
 
 Ursprung: digiCamControl (https://github.com/dukus/digiCamControl),
-LGPL/GPL-lizenziert. Enthält sowohl Quellcode (.cs) als auch kompilierte
+MIT-lizenziert. Enthält sowohl Quellcode (.cs) als auch kompilierte
 DLLs (Accord, Canon.Eos.Framework, CameraControl.Devices,
 Interop.PortableDevice*, Newtonsoft.Json, websocket-sharp, Rssdp.Native,
 PortableDeviceLib u.a.).
 
-Vor dem Build: die drei Ordner aus einem lokalen Backup/direkt aus dem
-digiCamControl-Quellstand wieder hier ablegen.
+Vor dem Build: die drei Ordner aus dem Original-digiCamControl-Quellstand
+(siehe Link oben) wieder hier ablegen.
+
+Ausnahme: CameraControl.Devices/Nikon/NikonD3300.cs ist eine eigene
+Erweiterung (eigener Copyright-Vermerk im Dateikopf) und bleibt daher
+im Repo versioniert.
