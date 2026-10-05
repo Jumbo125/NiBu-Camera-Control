@@ -25,3 +25,14 @@ Worker/Photobox.CameraBridge/dlls/*
 !Worker/Photobox.CameraBridge/dlls/DLLS_INFO.txt
 Worker/refs/*
 !Worker/refs/DLLS_INFO.txt
+
+# Code/Binaries ursprünglich aus digiCamControl (LGPL/GPL, nicht hier
+# versioniert). Siehe WORKER_EXTERNAL_INFO.txt.
+Worker/CameraControl.Devices/
+Worker/Canon.Eos.Framework/
+Worker/PortableDeviceLib/
+
+# Dateien direkt im DEV-Root, nicht für GitHub gedacht (lokale Notizen,
+# übergeordnete Solution über alle DEV-Projekte)
+/DEV.sln
+/befehele nikon.txt
